@@ -1,0 +1,75 @@
+---
+title: "RiboLausanne Report"
+author: "Dermot Harnett"
+output: github_document
+toc: yes
+
+---
+
+
+
+```{r setup, include=FALSE}
+#output: rmarkdown::github_document
+library(knitr)
+library(svglite)
+svglite
+```
+
+```{r timestamp, echo = TRUE}
+Sys.time()
+```
+
+
+## Background
+
+This report will show my analyses of the Riboseq data from the 3 Lausanne cancer cell lines.
+
+The cell lines from the lab of Michal Bassini.
+
+Rnaseq is available on them, as well as exome-seq data.
+
+```we are focusing on three samples (OMM4.75, OD5P and ONVC) which are melanoma samples. ```
+
+```We have identified EREs and LncRNAs derived HLA-I peptides and we will screen them this summer for T cell responses.```
+
+```I have now attached for one cell line, OD5P, the coordinates and ENSG from the genes encoding our hits, a few retroviral elements and quite a few ncRNAs. ```
+
+
+## results
+
+### Executive Summary
+
+### Todos
+
+- Look at the loci identified, see how many of them have ORFs.
+
+#### Data Quality
+
+Some text below
+
+```{r f1 nap, out.width ='900px', out.height ='900px' ,fig.cap = "", dev='svg'}
+dir.create('plots',showWarnings = FALSE)
+#create placeholder
+svglite('plots/tmp.svg');plot(1,type='n');text(1,1,"This is a placeholder plot",cex=2);dev.off()
+include_graphics("plots/tmp.svg")
+include_graphics("plots/tmp.svg")
+
+```
+
+Some text above
+
+This is a link to the full RNAseq report - [save it](report_Lausanne_lab.html)
+
+This is a link to the full SataNN report - [save it](report_Lausanne_lab.html)
+
+
+
+### Specific Loci
+
+Plots showing the 3bp Periodicity for OD5P for one cell line
+
+
+
+
+## Methods
+
