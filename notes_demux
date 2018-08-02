@@ -1,0 +1,2 @@
+qsub -N demux -cwd -l h_vmem=8G -l h_stack=100M -j y -o TEST.log -b y "/usr/local/BIMSB/bcl2fastq2/bin/bcl2fastq --runfolder-dir /data/basecalls/2018/180223_NS500648_0241_AHHVT2BGX3/ --sample-sheet SampleSheet.csv --barcode-mismatches 1 -r 1 -d 1 -p 1 -w 1 --output-dir ."
+

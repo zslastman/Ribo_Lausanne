@@ -1,0 +1,11 @@
+*Rproj*
+*sublime-*
+.Rproj.user
+ exploration/intermediate_results/
+.Rhistory
+.RData
+.Ruserdata
+git
+pipeline
+*fastq.gz
+*fastq
