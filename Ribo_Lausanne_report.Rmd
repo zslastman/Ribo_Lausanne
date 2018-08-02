@@ -47,7 +47,7 @@ Rnaseq is available on them, as well as exome-seq data.
 
 Some text below
 
-```{r f1 nap, out.width ='900px', out.height ='900px' ,fig.cap = "", dev='svg'}
+```{r f1 nap, out.width ='900px', out.height ='900px' ,fig.cap = "", dev='svg',echo=FALSE,include=TRUE,eval=TRUE}
 dir.create('plots',showWarnings = FALSE)
 #create placeholder
 svglite('plots/tmp.svg');plot(1,type='n');text(1,1,"This is a placeholder plot",cex=2);dev.off()
@@ -61,7 +61,6 @@ Some text above
 This is a link to the full RNAseq report - [save it](report_Lausanne_lab.html)
 
 This is a link to the full SataNN report - [save it](report_Lausanne_lab.html)
-
 
 
 ### Specific Loci
