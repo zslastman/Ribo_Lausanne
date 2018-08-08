@@ -12,7 +12,6 @@ toc: yes
 #output: rmarkdown::github_document
 library(knitr)
 library(svglite)
-svglite
 ```
 
 ```{r timestamp, echo = TRUE}
@@ -50,7 +49,7 @@ Some text below
 ```{r f1 nap, out.width ='900px', out.height ='900px' ,fig.cap = "", dev='svg',echo=FALSE,include=TRUE,eval=TRUE}
 dir.create('plots',showWarnings = FALSE)
 #create placeholder
-svglite('plots/tmp.svg');plot(1,type='n');text(1,1,"This is a placeholder plot",cex=2);dev.off()
+svg('plots/tmp.svg');plot(1,type='n');text(1,1,"This is a placeholder plot",cex=2);dev.off()
 include_graphics("plots/tmp.svg")
 include_graphics("plots/tmp.svg")
 
@@ -76,3 +75,44 @@ plot(1)
 
 ## Methods
 
+### Alignment ORF detection.
+- i figured out which genome things were in by going through gencode gtf files. turns out our link RNAs, and presumably our peptides, are in gencode22, and hence GRCh38, while the vcfs are in 'GRCh37' (per the vcf file)
+- Lorenzo's work was in hg38, based on the overlap with Rpls
+- I then tried to figure out what these peptides actually were
+- I aligned to human genome GR38 since this is the genome used in the external files
+- i lifted variants over from 37 to 38.
+- using gencode annotation 22
+- I then ran the standard cubi RNAseq pipeline - star. seqqc etc etc.
+- I used the bams from this as input for the SaTaNN pipeline.
+
+
+### Loci plots
+
+- initially made use of Lorenzo's bigwigs
+	- These were single basepair, 5' ends, which I checked by loading R and looking at them
+	- Once alignments of these were done I tested whether they were the same - they ____
+	- The plots are colored to indicate frame, show indications of start codon positions, and are also annotated with the pvalue for a test of periodicity in the best reading frame.
+
+ - Made use of the saved R files Lorenzo  provided
+- then later used my own
+
+- lorenzo's saved bigwigs are apparently not usable.
+
+- the first set of guys look like repeat associated peptides?
+- first one is from a gene called IQCK, in the middle of an intron
+
+### Variant Info
+ 
+- Incorporated the variant info into the calls by re running with a custom genome I made from the VCF provided, and the relevant fasta file
+- Ran SaTaNN using this new info to produce the variant sequences
+
+### Generation of peptide databases for maxquant
+
+### Improvements for later
+Make SataNN run with bams rather than the genome files etc.
+Detect splice site disruptions, ask SaTaNN if intermediate space has 3bp periodicity?
+
+
+[comment]: # (I need a good system for stock genome files. I've already written bioconductor genomes to fasts, I"ll probably just do that.______)
+
+[comment]: # (This paper has bayesian analysis of periodicity in it! V. interesting. I should https://onlinelibrary.wiley.com/doi/pdf/10.1111/1467-9892.00145)
