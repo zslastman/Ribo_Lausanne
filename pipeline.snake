@@ -1,0 +1,1159 @@
+# the qc step at the moment assumes that the data is single ended
+#
+shell.executable("bash")
+shell.prefix("set -e  pipefail;")
+# user set parameter
+TMPDIR = '../tmp'
+SCRIPTDIR = '../git/rna_seq/scripts'
+
+# #reference genome
+REF_orig = '../../genomes/hg38.fa'
+
+
+#things this needs - all sorts of shit for the R scripts....
+#samtools, bed tools, a bunhc of ucsc tools, picard, 
+
+# import os
+# def filebase(file): return()
+
+
+# # used by star
+# STARINDEX = "/fast/projects/cubit/0.12.0/static_data/precomputed/STAR/2.4.1d/GENCODE/M12/GRCm38/p5.chr_scaff/50/"
+# # used by 
+# GTF_orig = '/fast/projects/cubit/0.12.0/static_data/annotation/GENCODE/M12/GRCm38/gencode.vM12.annotation.gtf'
+# GTF_cdsfilt = 'static_local/gencode.vM12.annotation_cdsfilt.gtf'
+# CDSGTF = 'static_local/gencode.vM12.annotation.cds.gtf'
+
+# # used by infer_experiment
+# BED = 'static_local/gencode.vM12.annotation.bed'
+# GFF = '/fast/projects/cubit/0.12.0/static_data/annotation/GENCODE/M12/GRCm38/gencode.vM12.annotation.gff3'
+
+#for f in $(echo star/data/*/!(*star_transc*).bam ) ; do samtools view $f  | head -n 300 | cut -d$'\t' -f 6 | awk -v f="$f" '{print $0,f}'  ; done  > cigar_sample.txt
+
+REF = 'my_'+os.path.splitext(os.path.split(REF_orig)[1])[0]+'.fa'
+
+
+#STAR uses the rsem index
+STARINDEX = 'rsemref'
+
+# used by infer_experiment
+GTF_orig = '../annotation/gencode.v22.annotation.gtf'
+GFF_orig = '../annotation/gencode.v22.annotation.gff3'
+
+ANNOBASE = 'my_'+os.path.splitext(os.path.split(GTF_orig)[1])[0]
+
+GFF = ANNOBASE+'.gff3'
+
+BED = ANNOBASE+'.bed'
+
+# used by 
+GTF = ANNOBASE+'.gtf'
+CDSGTF = ANNOBASE+'.cdsfilt.gtf'
+#used to make indices
+RNAFASTA = ANNOBASE+'.transcript.fa'
+CDSFASTA = ANNOBASE+'.cds.fa'
+
+# need to think on this.... we start with a genome and a gff3 file. We add the extra transcript to our gff3 file, (optionally eliminating all others) 
+#then we create the transcript fasta file from our gff3 file, and the gtf file. Then, we use these to make salmon, and rsem/star indices
+
+# htseq parameter
+HTSEQ_MODE = 'union'
+
+
+# used by qc
+SeQC_GTF = ANNOBASE+'_SEQC_GTF'+'.gtf'
+SeQC_REF = REF
+
+
+RSEMINDEXFOLD="rsemref"
+
+SAMPLELINES = [line.strip().split(',') for line in open("sample_parameter.csv").readlines()]
+
+#switch for testmode
+if(config.get('test',0)): 
+  print('\n\n--------testmode on -------------\n\n')
+  SAMPLELINES = SAMPLELINES[0:2]  
+  origSAMPLE = [ entry[SAMPLELINES[0].index('sample_id')] for entry in SAMPLELINES[1:]]
+  SAMPLES = ['test']
+
+else:
+  SAMPLES = [ entry[SAMPLELINES[0].index('sample_id')] for entry in SAMPLELINES[1:]]
+
+
+
+#get our info as dictionaries
+def tab_to_dict(SAMPLELINES,valcol):
+  valind = SAMPLELINES[0].index(valcol)
+  vals   = [ entry[valind] for entry in SAMPLELINES[1:]]
+  return dict(zip(SAMPLES,vals))
+
+#sample - info dictionaries
+LIBRARY_DICT          = tab_to_dict(SAMPLELINES,'library_layout')
+READ_PATTERN_DICT     = tab_to_dict(SAMPLELINES,'read_pattern')
+PROTOCOL_DICT         = tab_to_dict(SAMPLELINES, 'protocol')
+FRAG_LENGTH_MEAN_DICT = tab_to_dict(SAMPLELINES, 'fragment_length_mean')
+FRAG_LENGTH_SD_DICT   = tab_to_dict(SAMPLELINES, 'fragment_length_sd')
+
+ASSAY_DICT            = tab_to_dict(SAMPLELINES, 'assay')
+GTF_DICT              = {k: CDSGTF if 'ribo' in v else GTF for k, v in ASSAY_DICT.items()}
+
+#for f in $(echo input/*); do for q in $( echo ${f}/* ); do echo $f $q; done; done | sed 's/input\///' > pipeline/sample_file.txt
+SAMPLEFASTQLINES = [line.strip().split(' ') for line in open("sample_file.txt").readlines()]
+FASTQS = [l[1] for l in SAMPLEFASTQLINES]
+FASTQSAMPLES = [l[0] for l in SAMPLEFASTQLINES]
+FASTQSAMPLEDICT = dict(zip(FASTQS,FASTQSAMPLES))
+SAMPLEFASTQDICT = {v:[i for i in FASTQSAMPLEDICT.keys() if FASTQSAMPLEDICT[i] == v ] for k,v in FASTQSAMPLEDICT.items()}
+
+
+#print(FASTQSAMPLES)
+#print(SAMPLES)
+
+assert set(FASTQSAMPLES) == set(SAMPLES)
+
+
+
+#the group dict is structured differently, returns a list of samples
+GROUP_DICT = tab_to_dict(SAMPLELINES,'group')
+GROUP_SAMPLES = {}
+
+for k, v in GROUP_DICT.items():
+    GROUP_SAMPLES[v] = GROUP_SAMPLES.get(v, [])
+    GROUP_SAMPLES[v].append(k)
+
+GROUPS = list(GROUP_SAMPLES.keys())
+
+#information on the strand of stuff
+strands = ['pos','neg']
+STRANDSYMS={strands[0]:'+',strands[1]:'-'}
+
+#extensions for transcript and chromosome bigwigs
+istransvals = ['.transcript','.chr']
+#extensions used by STAR to denot the transcript/genomic bam
+BEXTS={istransvals[0]:'.star_transcript',istransvals[1]:''}
+
+
+# print('Samples are: ',SAMPLES)
+# print('Groups are: ',GROUPS)
+
+
+RIBO_TOTAL_DICT = dict(zip(
+  list(filter(lambda x: 'ribo' in x,SAMPLES)),
+  list(filter(lambda x: 'total' in x,SAMPLES))
+))
+
+GENEREGIONS = ['gene','cds','fputrs','tputrs']
+# generegions = ['gene','cds','fputrs','tputrs','cds_tiles','fputr_tiles','tputr_tiles']
+
+# TRNAs = ['gencode.vM12.tRNAs.gtf.gz']
+TRNAs = ['tRNAs']
+
+READRANGES = ['25_30','1_26','27_28','29_100','1_300']
+READRANGENUM = [[25,30],[1,26],[27,28],[29,100],[1,300]]
+READRANGEDICT = dict(zip(READRANGES,READRANGENUM))
+
+
+clustermethods = ['kmeans','tsne']
+clusterdata=[
+'cent_scaled_exprdata',
+'limma_fold_changes',
+# 'composite_fold_changes',
+# 'composite_fold_changes_ribodfilt',
+'cent_scaled_exprdata_ribodfilt',
+'limma_fold_changes_ribodfilt']
+
+
+rule all:
+  input:
+    expand("riboqc/data/{sample}/.done",sample=SAMPLES),
+    # expand("preprocessed_reads/{sample}/{sample}.fastq.gz", sample = SAMPLES),
+    #expand("processed_reads/{sample}/.done", sample = SAMPLES),
+    # expand("cutsequences/{sample}/cutseqs.txt.gz", sample = SAMPLES),
+    #GTF,
+    # CDSFASTA,
+    # expand("rsem/data/{sample}/.done", sample = SAMPLES),
+    #expand("fastqc/data/{sample}/.done", sample = SAMPLES),
+    #    "fastqc/summary/fastqc_summary.tsv",
+    #k    expand("star/data/{sample}/.done", sample = SAMPLES),
+    #expand("infer_experiment/data/{sample}/.done", sample = SAMPLES),
+    expand("qc/data/{sample}/.done", sample = SAMPLES),
+    # expand("dupradar/data/{sample}/.done", sample = SAMPLES),
+    # expand("htseq/data/{sample}/.done", sample = SAMPLES),
+    # expand('feature_counts_readrange/data/{sample}/{generegions}/{readrange}/.done', sample=RIBO_TOTAL_DICT.keys(), generegions=GENEREGIONS+TRNAs, readrange=READRANGES),
+    # expand("feature_counts/data/{sample}/.done", sample = SAMPLES),
+    # expand("feature_counts/all_feature_counts"),
+    # expand("feature_counts/data/{sample}/{generegions}/{readrange}/.done", sample = SAMPLES, generegions = generegions+TRNAs, readrange = READRANGES),
+    # expand("kallisto/data/{sample}/.done", sample = SAMPLES),
+#expand("bigwigs/{group}/{strand}/{istrans}.done",group = SAMPLES,strand=strands,istrans=istransvals),
+    # expand("mergedbigwigs/{group}/{strand}/{istrans}.done",group = GROUPS,strand=strands,istrans=istransvals),
+    # expand("ribotaper/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
+#expand("ribotapermetaplots/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
+
+MINREADLENGTH=20
+MAXREADLENGTH=300
+QUALLIM=20
+CUTADAPTBIN="~/bin/cutadapt"
+REMOVE8NBIN="~/bin/remove8N.pl"
+
+
+
+#things this needs - cutadapt, remove8N.pl, STAR,collapse_reads.pl,seqtk
+
+# rule make_test_fastq:
+#   input: '../gdrive/RiboSeq_Ribo_Transcriptome','../gdrive/RNASeq_Total_Transcriptome/'
+#   output: 'preprocessed_reads/test/test.fastq.gz'
+#   shell:r"""
+#     set -e
+#     mkdir -p preprocessed_reads/test/
+#     seqtk sample -s100 ../gdrive/RNASeq_Total_Transcriptome/E13_1.fastq.gz 10000 | gzip > {output}
+#     if [ 0 -eq $(gzip -l {output} | awk 'NR==2 {{print $2}}') ]; then rm {output} ; fi
+
+#       """
+
+rule link_in_ref:
+  input: REF_orig
+  output: REF
+  shell:r"""
+      ln -fs {REF_orig} {REF}
+      """
+
+rule link_in_files:
+  input: lambda wc: SAMPLEFASTQDICT[wc['sample']]
+  output: touch('preprocessed_reads/{sample}/{fastq}')
+  run:
+    sample = wildcards['sample']
+    fastqs = SAMPLEFASTQDICT[sample]
+    shell(r"""
+      set -evx
+       for fastq in $(echo {fastqs}) ;do ln -rsf $(readlink -f $fastq) preprocessed_reads/{sample}/;done
+    """)
+
+
+rule cutadapt_reads:
+  input: 'input/{sample}/{fastq}'
+  output: 'cutadapt_reads/{sample}/{fastq}'
+  run:
+    sample = wildcards['sample']
+    fastqs = input
+    shell(r"""
+      set -evx
+      
+      mkdir -p cutadapt_reads/{sample}/
+      zcat {input} \
+      | cutadapt \
+        -a TGGAATTCTCGGGTGCCAAGG \
+       --minimum-length {MINREADLENGTH} \
+       --maximum-length {MAXREADLENGTH} \
+       -q {QUALLIM} - \
+       2> cutadapt_reads/{sample}/{wildcards.fastq}.cutadaptstats.txt \
+       | gzip > cutadapt_reads/{sample}/{wildcards.fastq}
+    """)
+
+rule collapse_reads:
+    input: 'cutadapt_reads/{sample}/{fastq}'
+    output: 'collapse_reads/{sample}/{fastq}'
+    run:
+        sample = wildcards['sample']
+        shell(r"""
+       set -evx
+     
+       mkdir -p collapse_reads/{sample}/
+     
+       zcat {input} \
+         | ~/bin/collapse_reads.pl {wildcards.sample} \
+         2> collapse_reads/{wildcards.sample}/{wildcards.fastq}.collreadstats.txt \
+         > {output}
+     """)
+
+
+rule trim_reads:
+    input: 'collapse_reads/{sample}/{fastq}'
+    output: 'trim_reads/{sample}/{fastq}'
+    run:
+        sample = wildcards['sample']
+        outfile = input[0].replace('.gz','-2xNNNN.fastq')
+        shell(r"""
+       set -evx
+     
+       mkdir -p trim_reads/{sample}/     
+     
+       {REMOVE8NBIN}  {input}
+
+       if [ ! -s {outfile} ] ; then exit; fi
+     
+       gzip -f {outfile}
+
+       mkdir -p trim_reads/{sample}/
+       mv {outfile}.gz {output}
+       rm {input}
+     """)
+
+#this rule is the 'signal spliter where we go from sample to indiv fastqs
+rule link_processed_reads:
+  input: 
+    lambda wc: [fastq.replace('input/','trim_reads/') for fastq in SAMPLEFASTQDICT[wc['sample']]]
+  output: touch('processed_reads/{sample,[^/]+}/.done')
+  shell:r"""
+        mkdir -p processed_reads/{wildcards.sample}
+        ln -rifs $(readlink -f {input}) processed_reads/{wildcards.sample}/
+    """
+# rule link_total_fastq:
+#   input: 'preprocessed_reads/{sample}/{sample}.fastq.gz'
+#   output: touch('processed_reads/{sample,.*total.*}/.done')
+#   run:
+#     sample = wildcards['sample']
+#     shell(r"""
+#       set -evx
+#       mkdir -p processed_reads/{sample}/
+#       ln -sf $(readlink -f {input}) processed_reads/{sample}/{sample}.fastq.gz
+#     # ln -rsf $(readlink -f {input}/*) processed_reads/{sample}/{sample}.fastq.gz
+#     """)
+
+# 
+# rule no_process_reads:
+#   input: lambda wc: SAMPLEFASTQDICT[wc['sample']]
+#   output: touch('processed_reads/{sample}/.done')
+#   run:
+#     sample = wildcards['sample']
+#     fastqs = SAMPLEFASTQDICT[sample]
+#     shell(r"""
+#       set -evx
+#        for fastq in $(echo {fastqs}) ;do ln -rsf $(readlink -f $fastq) processed_reads/{sample}/;done
+#     """)
+
+###OOOOOOkay. GFF read does some weird shit including excluding 'transcript' lines.....
+rule gffread:
+  input: REF,GTF_orig
+  output: GTF,CDSGTF,RNAFASTA,CDSFASTA,BED
+  run:
+    shell(r""" 
+      # set -x
+      #with filtering output all sequences
+      cat {GTF_orig} \
+      | sed -r  's/((transcript_id|gene_id|protein_id|ID=\w+|Parent)\W+\w+)\.[0-9]+/\1/g' \
+      > {GTF}
+
+      #needs gff - output exon sequences
+      cat {GFF_orig} |  grep -P -e'\texon\t|^\#' | gffread - -F -E -g {REF} -W -w {RNAFASTA} -o /dev/null
+
+      #Note we are now minus the transcript and exon entries for these
+      #now make GTF
+
+      #| grep -P -e'\tCDS\t|^\#' 
+     #with filtering, output the coding sequences filteirng out the ones that aren't in frame, have a stop codon, are pseudogenes etc.
+      
+      cat {GFF_orig}  \
+        | sed -r  's/((transcript_id|gene_id|protein_id|ID=\w+|Parent)\W+\w+)\.[0-9]+/\1/g' \
+        | gffread - -C -V -J --no-pseudo  -F -E -g {REF} \
+        -W -w {ANNOBASE}.coding.transcript.fa -x {CDSFASTA} -y {ANNOBASE}.protein.fa -T \
+        -o /dev/stdout \
+        | awk -v FS="\t" -v OFS="\t" '{{if($3=="CDS"){{$3="exon";print $0}}}}' \
+         > {CDSGTF}
+
+      #now make bed
+      cat {GTF_orig} | awk '{{print $1,$4,$5,"name",$6,$7}}' > {BED}
+      """)
+
+
+rule make_seqc_gtf:
+  input: GTF_orig
+  output: SeQC_GTF
+  shell: r"""
+    set -x
+
+      cat {input} \
+        | grep -Pe '#|\ttranscript\t'  \
+        | sed 's/geneID/gene_id/' \
+        | sed -r  's/((transcript_id|gene_id|protein_id|ID=\w+|Parent)\W+\w+)\.[0-9]+/\1/g' \
+        | sed 's/geneID/gene_id/' \
+        | grep -P "transcript_type\W+(protein_coding|rRNA)|^\#" \
+        | sed -e '/\tgene\t/ s/gene_id \(.ENSG[0-9]*.[0-9]*..\)/\0 transcript_id \1/' \
+        > {SeQC_GTF}
+      
+      """
+ 
+rule make_utrs:
+  input: GTF=GTF_orig
+  output: fputrs='fputrs.gtf',tputrs='tputrs.gtf'
+  # script: 'make_utrfiles.R'
+  run:
+    shell(r"""
+      set -ex
+      # module load Cufflinks/2.2.1
+      #with filtering output all sequences
+      cat {input.GTF}  \
+      | awk -v OFS="\t"  '{{if($3=="five_prime_UTR"){{         ;print $0}}}}' \
+      | sed -r  's/((transcript_id|gene_id|protein_id|ID=\w+|Parent)\W+\w+)\.[0-9]+/\1/g' \
+      > {output.fputrs} 
+
+      cat {input.GTF} \
+      | awk -v OFS="\t"  '{{if($3=="three_prime_UTR"){{         ;print $0}}}}' \
+      | sed -r  's/((transcript_id|gene_id|protein_id|ID=\w+|Parent)\W+\w+)\.[0-9]+/\1/g' \
+      > {output.tputrs}
+
+     
+      """) 
+
+rule fastqc:
+     input: 'processed_reads/{sample}/.done'
+     output: touch('fastqc/data/{sample}/.done')
+     threads: 4
+     log:'fastqc/reports/{sample}/fastqc.log'
+     run:
+      reads= [fq.replace('input/','processed_reads/') for fq in SAMPLEFASTQDICT[wildcards['sample']]]
+      shell(r'''wait $(for i in {reads}; do $( fastqc $i ) & done) ''')
+
+rule collect_fastqc:
+     input:
+          all_results = expand("fastqc/data/{sample}/.done", sample=SAMPLES)
+     output:
+          result='fastqc/summary/fastqc_summary.tsv',
+          log='fastqc/summary/fastqc_summary.log'
+     shell:
+          r"""
+          set -e
+          mkdir -p $(dirname {output.result}) 
+          {SCRIPTDIR}/collect_fastqc_results.sh -i fastqc/ \
+          > {output.result} \
+          2> {output.log} 
+          """
+
+rule star:
+     input:
+          fastqs='processed_reads/{sample}/.done',
+          RSEMINDEXFOLD=RSEMINDEXFOLD+'/.done',
+     output:
+          done = touch('star/data/{sample,[^/]+}/.done')
+     threads: 8
+     run:
+          read_pattern = READ_PATTERN_DICT[wildcards['sample']]
+          shell(r"""
+          
+          mkdir -p star/reports/{wildcards.sample}
+          {SCRIPTDIR}/run_my_star.sh -m -@ {threads} -i $(dirname {input.fastqs}) {read_pattern} -o $(dirname {output}) \
+          -r star/reports/{wildcards.sample} -t {TMPDIR} -l NoSharedMemory -x {RSEMINDEXFOLD} 
+          """)
+          
+rule cutsite_kmers:
+  input: 'star/data/{sample}/.done',REF
+  output: 'cutsequences/{sample}/cutseqs.txt.gz'
+  threads: 8
+  run:
+    bam = input[0].replace('.done','[^r][^i][^p][^t].bam')
+    chromsizes = 'cutsequences/'+wildcards['sample']+'/chrsizes'
+    halfKMERSIZE = KMERSIZE/2
+    shell(r"""
+        set -evx
+        samtools view -H {input} | grep "SQ" | sed -r 's/^@SQ\s+SN://' | sed -r "s/\s+LN:/\t/" > {chromsizes} 
+        mkdir -p cutsequences/{wildcards.sample}
+
+        samtools view -bF 0x10 {bam} \
+          | bedtools bamtobed -i stdin | head -n 100000 \
+          | bedtools intersect -a /dev/stdin -b {CDSGTF} -u \
+          | awk -v OFS="\t" '{{print $1,$2-{halfKMERSIZE},$2+{halfKMERSIZE}}}' \
+          | bedtools getfasta -bed - -fi {REF} -fo /dev/stdout -s \
+          | grep -v ">"  | sort | uniq -c  | gzip > {output}
+       
+
+        samtools view -bF 0x10 {bam} \
+          | bedtools bamtobed -i stdin | head -n 100000 \
+          | bedtools intersect -a /dev/stdin -b {CDSGTF} -u \
+          | awk -v OFS="\t" '{{print $1,$3-{halfKMERSIZE},$3+{halfKMERSIZE}}}' \
+          |bedtools getfasta -bed - -fi {REF} -fo /dev/stdout -s \
+          | grep -v ">"  | sort | uniq -c  | gzip > {output}.right.gz
+
+          # |bedtools slop -i - -b -{halfKMERSIZE} -g {chromsizes}  \
+          # |bedtools flank -b {KMERSIZE} -i /dev/stdin -g {chromsizes} \
+          # | awk 'NR%2==0' 
+
+        # bedtools bamtobed -i {bam} \
+        #   |grep '+$' \
+        #   |bedtools intersect -a /dev/stdin -b {CDSGTF} -u \
+        #   |bedtools slop -i - -b -{halfKMERSIZE} -g {chromsizes}  \
+        #   |bedtools flank -b {KMERSIZE} -i /dev/stdin -g {chromsizes} \
+        #   |awk 'NR%2==1'  \
+        #   |bedtools getfasta -bed /dev/stdin -fi {REF} -fo /dev/stdout -s \
+        #   | grep -v ">"  | sort | uniq -c  | gzip > {output}.right.gz
+  """)
+
+
+
+# TESTSECTION="1:1-1260071"
+
+# rule preprocess_bam:
+#     input: get_bam
+#     output: "work/{sample}/{sample}.preprocess.bam"
+#     shell: r"""
+#     samtools view -bh {input} {TESTSECTION} > {output}
+#     samtools index {output}
+#     """
+
+
+# rule bwa_mem:
+#      input:
+#           'processed_reads/{sample}/{sample}.fastq.gz'
+#      output:
+#           done = touch('star/data/{sample}/.done')
+#      threads: 8
+#      run:
+#           read_pattern = READ_PATTERN_DICT[wildcards['sample']]
+#           shell(r"""
+#           set -e
+#           mkdir -p star/reports/{wildcards.sample}
+#           {SCRIPTDIR}/run_my_star.sh -m -@ {threads} -i {input} {read_pattern} -o $(dirname {output}) \
+#           -r star/reports/{wildcards.sample} -t {TMPDIR} -l NoSharedMemory -x {STARINDEX} 
+#           """)
+
+def get_trackfile(sample,strand,ext):
+  return 'bigwigs/'+sample+'/'+strand+'/'+sample+'.'+strand+ext
+
+#TODO strand is a problem here
+rule bigwigs:
+     input: 
+          "star/data/{sample}/.done"
+     output:
+          done = touch("bigwigs/{sample}/{strand}/{istrans}.done")
+     threads: 1
+     run:
+        bedgraph = get_trackfile(wildcards.sample,wildcards.strand,wildcards.istrans+'.bg')
+        bw = get_trackfile(wildcards.sample,wildcards.strand,wildcards.istrans+'.bw')
+        bext = BEXTS[wildcards.istrans]
+        bam = 'star/data/'+wildcards.sample+'/'+wildcards.sample+bext+'.bam'        
+        chromsizes = 'bigwigs/'+wildcards.sample+'/'+wildcards.istrans+'.chrsizes.txt'
+        strandsym = STRANDSYMS[wildcards.strand]
+        #turns out reversing the y axis breaks bigwig merge....
+        # revyaxis = -1 if strandsym is '-' else 1
+        revyaxis = 1
+
+        shell(r"""
+        set -e
+#module purge
+        mkdir -p bigwigs/{wildcards.sample}/{wildcards.strand}
+       
+        # count="$(cat star/reports/{wildcards.sample}/{wildcards.sample}.bam.bamstats.txt | \
+        #  grep -Po "reads mapped:\s+\d+" | \
+        #  grep -Po "\d+$" | awk '{{print {revyaxis}*1000000/$0}}' 
+        #  )"
+        count=1
+        samtools view -H {bam} | grep "SQ" | sed -r 's/^@SQ\s+SN://' | sed -r "s/\s+LN:/\t/" > {chromsizes} 
+
+        bedtools genomecov -5 -ibam {bam} -bg -strand {strandsym} -scale $count > {bedgraph}
+        bedSort {bedgraph} {bedgraph}
+        bedGraphToBigWig {bedgraph} {chromsizes} {bw}
+       
+        """)
+
+
+def getGroupBigWigs(wildcards):
+    strand = wildcards['strand']
+    samples = GROUP_SAMPLES[wildcards['group']]
+    return [get_trackfile(s,strand,wildcards.istrans+'.bw') for s in samples ]
+
+
+def getGroupBigWigDone(wildcards):
+    strand = wildcards['strand']
+    samples = GROUP_SAMPLES[wildcards['group']]
+    return ['bigwigs/'+s+'/'+strand+'/'+wildcards.istrans+'.done' for s in samples ]
+
+
+rule mergedbigwigs:
+     input: getGroupBigWigDone
+     output:
+          done = touch('mergedbigwigs/{group}/{strand}/{istrans}.done')
+     threads: 1
+     run:
+        chromsizes = 'bigwigs/'+GROUP_SAMPLES[wildcards.group][0]+'/'+wildcards.istrans+'.chrsizes.txt' 
+        bigwigs = getGroupBigWigs(wildcards)
+        libnum = len(bigwigs)
+        mergedfilebase="mergedbigwigs/"+wildcards.group+"/"+wildcards.strand+"/"+wildcards.group+"."+wildcards.strand+wildcards.istrans
+
+
+        shell(r"""
+        set -xe
+        module purge
+        module load kenttools/v329-foss-2015a
+        mkdir -p mergedbigwigs/{wildcards.group}/{wildcards.strand}/
+        
+        bigWigMerge {bigwigs} /dev/stdout | awk 'BEGIN{{OFS="\t"}}{{$4 = $4 /{libnum} ; print $0 }}' > {mergedfilebase}.bg 
+        
+        bedSort {mergedfilebase}.bg {mergedfilebase}.bg 
+
+        bedGraphToBigWig \
+          {mergedfilebase}.bg \
+          {chromsizes} \
+          {mergedfilebase}.bw
+
+        rm {mergedfilebase}.bg
+        """)
+
+rule infer_experiment:
+     input:
+          'star/data/{sample}/.done'
+     output:
+          done = touch('infer_experiment/data/{sample}/.done')
+     shell:
+          (r"""
+          set -e
+          mkdir -p infer_experiment/data/{wildcards.sample}
+          
+          module purge
+          module load RSeQC/2.6.2-foss-2015a-Python-2.7.9
+          infer_experiment.py -r {BED} \
+          -i star/data/{wildcards.sample}/{wildcards.sample}.bam \
+          -q 255 > infer_experiment/data/{wildcards.sample}/{wildcards.sample}.strand_stat.txt
+          """)
+     
+transcript_gene_map = 'transcript_gene_map.tsv'
+gene_transcript_map = 'gene_transcript_map.tsv'
+
+rule make_gene_transcript_map:
+  input: GTF
+  output: gene_transcript_map,transcript_gene_map
+  shell:(r"""
+    cat {input} \
+      | awk '$3=="exon"' \
+      | grep -Po '(?<=transcript_id ").*?gene_id.*?(?=";)' \
+      | sed 's/";.*gene_id "/\t/' \
+      |  awk '{{print $1,$2}}' \
+      | sort | uniq \
+      > {transcript_gene_map}
+
+    cat {transcript_gene_map} \
+      | awk '{{print $2,$1}}' > {gene_transcript_map}
+    """)
+
+rule rsemref:
+  input:
+    GTF=GTF,
+    REF=REF,
+    gene_transcript_map=gene_transcript_map
+  threads: 10
+  output:
+    touch(RSEMINDEXFOLD+'/.done')
+  run: 
+    shell(r"""
+
+      set -ex      
+
+      mkdir -p {RSEMINDEXFOLD}      
+
+      rsem-prepare-reference -p {threads} --gtf {input.GTF} \
+                              --transcript-to-gene-map {input.gene_transcript_map} \
+                              --star  \
+                              {input.REF} \
+                              {RSEMINDEXFOLD}/{ANNOBASE}
+
+      """) 
+
+rule rsem:
+     input:
+          'star/data/{sample}/.done',
+          RSEMINDEXFOLD+'/.done'
+     output:
+          done = touch('rsem/data/{sample}/.done')
+     threads: 8
+     run:
+        frag_length_mean = FRAG_LENGTH_MEAN_DICT[wildcards['sample']]
+        indexname = RSEMINDEXFOLD+'/'+(os.path.basename(GTF).replace('.gtf',''))
+
+        frag_length_sd = FRAG_LENGTH_SD_DICT[wildcards['sample']]
+
+        shell(r"""
+        set -e
+
+        rm -rf $(dirname {output})
+        mkdir -p $(dirname {output})
+        rm -rf rsem/reports/{wildcards.sample}
+        mkdir -p rsem/reports/{wildcards.sample}
+
+
+        {SCRIPTDIR}/run_my_rsem.sh -@ {threads} \
+        -b star/data/{wildcards.sample}/{wildcards.sample}.star_transcript.bam \
+        -o $(dirname {output}) -r rsem/reports/{wildcards.sample} -t {TMPDIR} \
+        -x $(echo {RSEMINDEXFOLD}/*grp | sed s/.grp//) \
+        -f {frag_length_mean} -d {frag_length_sd} \
+        # &> rsem/reports/{wildcards.sample}/{wildcards.sample}.rsem.log
+        """)
+
+rrna_intervals = 'qc/picard_rrna_intervals.txt'
+refflat = 'qc/'+ANNOBASE+'.refflat'
+
+rule make_picard_files:
+  input: GTF,'star/data/'+SAMPLES[0]+'/.done'
+  output: intervals=rrna_intervals,refflat=refflat
+  shell:r"""
+         samtools view -H star/data/{SAMPLES[0]}/{SAMPLES[0]}.bam > {output.intervals}
+
+         grep -Pe 'gene_type..rRNA.' {input[0]} \
+         | awk '$3 =="transcript"' \
+         | cut -f 1,4,5,7,9 \
+         | perl -lane ' /transcript_id "([^"]+)"/ or die "notranscript_id on $."; print join "\t", (@F[0,1,2,3], $1) ' \
+         | sort -k1V -k2n -k3n  - >> {output.intervals}
+        
+        gtfToGenePred -geneNameAsName2 {GTF} {GTF}.genepred
+        cat {GTF}.genepred | awk -vOFS="\t" '{{print $1,$0}}' > {output.refflat}
+
+  """
+
+rule qc:
+     input:
+          fastqc='fastqc/data/{sample}/.done',
+          star='star/data/{sample}/.done',
+          refflat = SeQC_REF+".fai",
+          rrna_intervals = rrna_intervals,
+     output:
+          done=touch('qc/data/{sample}/.done'),
+     run:
+        singleendflag = ' -singeEnd ' if LIBRARY_DICT[wildcards['sample']] == 'PAIRED' else ''   
+        bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
+        shell(
+          r"""
+          set -e
+          set -xv
+          
+        OUTDIR=$(dirname {output.done})
+        mkdir -p qc/reports/{wildcards.sample}/
+
+        {SCRIPTDIR}/read_statistic_report.sh \
+         -l star/reports/{wildcards.sample}/Log.final.out  \
+         -g $(dirname {input.fastqc}) \
+         -o ${{OUTDIR}}/read_alignment_report.tsv \
+         &> qc/reports/{wildcards.sample}/{wildcards.sample}_qc.log 
+
+         picard CollectRnaSeqMetrics \
+          I={bamfile} \
+          O=${{OUTDIR}}/{wildcards.sample}_picard_qc.txt \
+          REF_FLAT={refflat} \
+          STRAND=FIRST_READ_TRANSCRIPTION_STRAND \
+          RIBOSOMAL_INTERVALS={rrna_intervals}
+        
+        picard CollectAlignmentSummaryMetrics \
+          INPUT={bamfile} \
+          OUTPUT=${{OUTDIR}}/{wildcards.sample}.picard.alignmentmetrics.txt \
+          R={REF}
+
+      {SCRIPTDIR}/read_duplication.sh \
+        -i {bamfile} \
+        -o ${{OUTDIR}}/duplication/ \
+        &> qc/reports/{wildcards.sample}/{wildcards.sample}_qc.log 
+
+          """)
+     
+     
+rule dupradar:
+    input:
+        'star/data/{sample}/.done'
+    output:
+        touch('dupradar/data/{sample}/.done')
+    run:
+        library = LIBRARY_DICT[wildcards['sample']]
+        paired = 'TRUE' if library == 'PAIRED' else 'FALSE'
+
+        protocol = PROTOCOL_DICT[wildcards['sample']]
+        map_protocol = { 'no': 0, 'yes': 1, 'reverse': 2 }
+        stranded = map_protocol[protocol]
+
+        shell(r"""
+        module unuse /fast/projects/cubit/current/tools/easybuild/modules/all
+        module use /fast/projects/cubit/wip_oliver/tools/easybuild/modules/all
+        module purge
+        module load dupRadar/1.4.0-foss-2015a-R-3.2.4
+
+        outdir=$(dirname {output})
+        id={wildcards.sample}
+        bam=$(dirname {input})/${{id}}.bam
+        threads=8
+
+        mkdir -p $outdir
+        
+        Rscript --vanilla {SCRIPTDIR}/dupradar.R \
+            $bam \
+            $id \
+            {GTF} \
+            {stranded} \
+            {paired} \
+            $threads \
+            $outdir
+        """)
+
+RIBOTAPERDIR="$HOME/Applications/ribotaper-1.3.1a/scripts/"
+RIBOTAPERANNOTDIR="Ribotaper_annot"
+
+rule make_ribotaper_annot:
+  input: GTF_orig = '/fast/projects/cubit/0.12.0/static_data/annotation/GENCODE/M12/GRCm38/gencode.vM12.annotation.gtf'
+  output: touch(RIBOTAPERANNOTDIR+"/.done")
+  run:
+    shell(r"""
+      set -ex
+
+      mkdir -p {RIBOTAPERANNOTDIR}
+      {RIBOTAPERDIR}/create_annotations_files.bash $(readlink -f {input.GTF_orig}) $(readlink -f {REF}) 'false' 'false' {RIBOTAPERANNOTDIR}
+      """)
+
+rule make_ribotaper_metaplots:
+  input:
+    annodir = RIBOTAPERANNOTDIR+"/.done",
+    ribobam = "star/data/{sample}/{sample}.bam"
+  output:
+    touch('ribotapermetaplots/{sample}/.done')
+  run:
+    startstopbed=RIBOTAPERANNOTDIR+'/start_stops_FAR.bed'
+    shell(r"""
+      mkdir -p ribotapermetaplots/{wildcards.sample}
+      bed=$(readlink -f {startstopbed})
+      bam=$(readlink -f {input.ribobam})
+      cd ribotapermetaplots/{wildcards.sample}
+      rm -rf metaplots
+      {RIBOTAPERDIR}/create_metaplots.bash $bam $bed {wildcards.sample}
+      """)
+
+
+#this is going to count reads in each library over 5'UTRS, CDS, and 3' UTRs
+
+
+rule feature_counts:
+     input:
+          'star/data/{sample}/.done',GTF,CDSGTF,'tputrs.gtf','fputrs.gtf'
+     output:
+          done = touch('feature_counts/data/{sample,[^/]+}/.done')
+     threads: 2
+     run:
+          GTF = GTF_DICT[wildcards['sample']]
+          protocol = PROTOCOL_DICT[wildcards['sample']]
+          if (protocol == 'no'):
+               protocol = 0
+          elif (protocol == 'yes'):
+               protocol = 1
+          elif (protocol == 'reverse'):
+               protocol = 2
+          else:
+               sys.exit('Protocol not known!')
+
+          library = LIBRARY_DICT[wildcards['sample']]
+
+          if (library == 'PAIRED'):
+               library = '-p'
+          else:
+               library = ''
+
+          shell(r"""
+          set -e
+          module purge
+          module load subread/1.4.6-p5
+
+          mkdir -p feature_counts/reports/{wildcards.sample}
+          mkdir -p feature_counts/data/{wildcards.sample}
+
+          featureCounts \
+          -T {threads} \
+          -t exon -gg ene_id \
+          -a {GTF} \
+          -s {protocol} {library} \
+          -o feature_counts/data/{wildcards.sample}/{wildcards.sample}.feature_counts \
+          star/data/{wildcards.sample}/{wildcards.sample}.bam \
+          &> feature_counts/reports/{wildcards.sample}/{wildcards.sample}.feature_counts.log
+          """)
+
+
+# rule readlenfilt:
+#   input: 'star/data/{sample}/.done'
+#   output:  'readlenfilt/data/{sample}/{readrange}/readlenfilt.bam'
+#   run:
+#     minreadlen,maxreadlen = READRANGEDICT[wildcards['readrange']]
+
+#     readrangebam = output[0]
+#     shell(r"""
+#           set -ex
+#           samtools view -h $(dirname {input})/{wildcards.sample}.bam \
+#            | awk '((length($10) >= {minreadlen})&&(length($10) <= {maxreadlen})) || $1 ~ /^@/' \
+#           | samtools view -S -b - > {readrangebam}
+            
+#       """)
+
+# rule feature_counts_readrange:
+#      input:
+#           GTF,CDSGTF,'tputrs.gtf','fputrs.gtf','tRNAs.gtf',
+#           readrangefilt='readlenfilt/data/{sample}/{readrange}/readlenfilt.bam'
+
+#      output:
+#           done = touch('feature_counts_readrange/data/{sample,[^/]+}/{generegions}/{readrange}/.done')
+#      threads: 2
+#      log: r"""feature_counts_readrange/reports/{sample}/{generegions}/{readrange}/feature_counts.log"""
+#      run:
+#           if (wildcards['generegions'] in ['gene','cds']):
+#             GTF = GTF_DICT[wildcards['sample']]
+#             groupcol = 'gene_id'
+#           else:
+#             GTF = wildcards['generegions']+'.gtf'
+#             groupcol = 'transcript_id'
+          
+#           protocol = PROTOCOL_DICT[wildcards['sample']]
+#           if (protocol == 'no'):
+#                protocol = 0
+#           elif (protocol == 'yes'):
+#                protocol = 1
+#           elif (protocol == 'reverse'):
+#                protocol = 2
+#           else:
+#                sys.exit('Protocol not known!')
+
+#           library = LIBRARY_DICT[wildcards['sample']]
+
+#           if (library == 'PAIRED'):
+#                library = '-p'
+#           else:
+#                library = ''
+
+#           countmultimappers = ' ' 
+          
+#           if (wildcards['generegions']=='tRNAs'):
+#             featuretype = 'tRNA'
+#             countmultimappers = '-M --fraction'
+          
+#           elif  (wildcards['generegions']=='tputrs'):
+#             featuretype = 'exon'
+#           elif  (wildcards['generegions']=='fputrs'):
+#             featuretype = 'exon'
+#           else:
+#             featuretype = 'exon'
+
+
+#           sample = wildcards['sample']
+#           generegions = wildcards['generegions']
+#           readrange = wildcards['readrange']
+#           rangebam = input['readrangefilt']
+          
+#           shell(r"""
+#           set -e
+#           module purge
+#           module load subread/1.4.6-p5
+
+#           mkdir -p feature_counts_readrange/reports/{sample}
+#           mkdir -p feature_counts_readrange/data/{sample}
+
+
+#           featureCounts \
+#             -T {threads} \
+#             -t {featuretype} -g {groupcol} \
+#             -a {GTF} \
+#             -s {protocol} {library} \
+#             -o feature_counts_readrange/data/{sample}/{generegions}/{readrange}/feature_counts \
+#             {countmultimappers} \
+#             {rangebam}
+
+#           """)
+
+# rule feature_counts:
+#      input:
+#           'star/data/{sample}/.done',GTF,CDSGTF,'tputrs.gtf','fputrs.gtf',
+#           expand('feature_counts_readrange/data/{sample}/{generegions}/{readrange}/.done', sample=RIBO_TOTAL_DICT.keys(), generegions=GENEREGIONS+TRNAs, readrange=READRANGES),
+#           expand('feature_counts_readrange/data/{sample}/{generegions}/{readrange}/.done', sample=RIBO_TOTAL_DICT.values(), generegions=GENEREGIONS+TRNAs, readrange=READRANGES[-1]),
+#      output:
+#           done = touch('feature_counts/data/{sample,[^/]+}/.done')
+#      threads: 2
+#      run:       
+#         bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
+#         if 'ribo' in wildcards['sample']:
+#           selregion='cds'
+#           selreadrange='25_30'
+#         else:
+#           selregion='cds'
+#           selreadrange='1_300'
+#         shell(r"""
+
+#           mkdir -p feature_counts/reports/{wildcards.sample}
+#           mkdir -p feature_counts/data/{wildcards.sample}
+
+#           head -n2 feature_counts_readrange/data/{wildcards.sample}/{selregion}/{selreadrange}/feature_counts \
+#           | tail -n1 \
+#           | awk '{{$7= "{bamfile}"}}' \
+#           >    feature_counts/data/{wildcards.sample}/{wildcards.sample}.feature_counts
+
+#           tail -n+3 feature_counts_readrange/data/{wildcards.sample}/{selregion}/{selreadrange}/feature_counts \
+#           >    feature_counts/data/{wildcards.sample}/{wildcards.sample}.feature_counts
+#           """)
+
+# rule aggregate_feature_counts:
+#   input : expand("feature_counts/data/{sample}/.done", sample = SAMPLES),
+#   output: 'feature_counts/all_feature_counts'
+#   run:
+#     fcountfiles = expand("feature_counts/data/{sample}/{sample}.feature_counts", sample = SAMPLES)
+#     shell(r""" 
+
+#        #( (sed '2q;d' {fcountfiles[0]} | cut -f1 && tail -n+3 {fcountfiles[0]}| sort -k1 | cut -f1) > {output})
+#        tail -n+3 {fcountfiles[0]}| sort -k1 | cut -f1 > {output}
+       
+#        #now for eahc fcount table, join it to the ids
+#        for fcountfile in $(echo {fcountfiles}); do
+
+#           tail -n+3 $fcountfile| sort -k1 | cut -f1,7 | join {output} - | sort -k1 > {output}tmp
+#           mv {output}tmp {output}
+       
+#        done
+
+#       echo "feature_id {SAMPLES}" | cat - {output} > {output}tmp
+#       mv {output}tmp {output}
+    
+#       """)
+
+satan_annot_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
+riboqc_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
+
+rule make_riboqc_anno:
+  input : GTF
+  output: touch('riboqc/annot.done')
+  run:
+    shell(r""" 
+      mkdir -p riboqc
+      Rscript {satan_annot_script} {GTF} riboqc/{ANNOBASE}.riboqc.db riboqc/{ANNOBASE}.annoout
+""")
+
+rule run_riboqc:
+  input : 'riboqc/annot.done','star/data/{sample}/.done',REF
+  output: touch('riboqc/data/{sample}/.done')
+  run:
+    bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
+    shell(r""" 
+            mkdir -p riboqc/data/{wildcards.sample}/
+            source activate riboqc
+            Rscript {riboqc_script} {REF} riboqc/{ANNOBASE}.annoout {bamfile} riboqc/data/{wildcards.sample}/
+  """)
+
+SaTAnn_script = '/fast/groups/ag_ohler/dharnet_m/satann_working/Satan_working_hg38_genc25_May8.R'
+
+rule run_satann:
+  input : 'riboqc/data/{sample}/.done'
+  output: touch('satann/{sample}/.done')
+  threads: 6
+  run:
+    fcountfiles = expand("feature_counts/data/{sample}/{sample}.feature_counts", sample = SAMPLES)
+    shell(r"""
+
+      {SaTAnn_script} \
+        {REF} \
+        riboqc/{ANNOBASE}.annoout \
+        {threads} \
+        riboqc/data/{wildcards.sample}/_to_SaTAnn \
+        $(dirname {output})/SaTAnn
+
+      """)
+
+
+# ule feature_counts_select:
+#      input:
+#           GTF,CDSGTF,'tputrs.gtf','fputrs.gtf','tRNAs.gtf',
+#           readrangefilt='readlenfilt/data/{sample}/{readrange}/readlenfilt.bam'
+
+#      output:
+#           done = touch('feature_counts/data/{sample,[^/]+}/{generegions}/{readrange}/.done')
+#      threads: 2
+#      log: r"""feature_counts/reports/{sample}/{generegions}/{readrange}/feature_counts.log"""
+#      run:
+#           if (wildcards['generegions'] in ['gene','cds']):
+#             GTF = GTF_DICT[wildcards['sample']]
+#             groupcol = 'gene_id'
+#           else:
+#             GTF = wildcards['generegions']+'.gtf'
+#             groupcol = 'transcript_id'
+          
+#           protocol = PROTOCOL_DICT[wildcards['sample']]
+#           if (protocol == 'no'):
+#                protocol = 0
+#           elif (protocol == 'yes'):
+#                protocol = 1
+#           elif (protocol == 'reverse'):
+#                protocol = 2
+#           else:
+#                sys.exit('Protocol not known!')
+
+#           library = LIBRARY_DICT[wildcards['sample']]
+
+#           if (library == 'PAIRED'):
+#                library = '-p'
+#           else:
+#                library = ''
+
+#           if (wildcards['generegions']=='tRNAs'):
+#             featuretype = 'tRNA'
+#           elif  (wildcards['generegions']=='tputrs'):
+#             featuretype = 'exon'
+#           elif  (wildcards['generegions']=='fputrs'):
+#             featuretype = 'exon'
+#           else:
+#             featuretype = 'exon'
+
+
+#           sample = wildcards['sample']
+#           generegions = wildcards['generegions']
+#           readrange = wildcards['readrange']
+#           rangebam = input['readrangefilt']
+
+#           shell(r"""
+            
+#           """)
+# #this is going to count reads in each library over 5'UTRS, CDS, and 3' UTRs
+# rule aggregate_feature_counts:
+#      input:
+#           'star/data/{sample}/.done',GTF,CDSGTF
+#      output:
+#           expand('feature_counts/data/{sample}/{generegions}.done',sample=SAMPLES)
+#      threads: 2
+#      log: r"""feature_counts/reports/{wildcards.sample}/{wildcards.sample}.{generegions}feature_counts.log"""
+#      run:
+#           if (wildcards['generegions']=='gene'):
+#             GTF = GTF_DICT[wildcards['sample']]
+#           else:
+#             GTF = wildcards['generegions']+'.gtf'
+#           protocol = PROTOCOL_DICT[wildcards['sample']]
+#           if (protocol == 'no'):
+#                protocol = 0
+#           elif (protocol == 'yes'):
+#                protocol = 1
+#           elif (protocol == 'reverse'):
+#                protocol = 2
+#           else:
+#                sys.exit('Protocol not known!')
+
+#           library = LIBRARY_DICT[wildcards['sample']]
+
+#           if (library == 'PAIRED'):
+#                library = '-p'
+#           else:
+#                library = ''
+
+#           shell(r"""
+#           set -e
+#           module purge
+#           module load subread/1.4.6-p5
+
+#           mkdir -p feature_counts/reports/{wildcards.sample}
+#           mkdir -p feature_counts/data/{wildcards.sample}
+
+#           featureCounts \
+#           -T {threads} \
+#           -t exon -g gene_id \
+#           -a {GTF} \
+#           -s {protocol} {library} \
+#           -o feature_counts/data/{wildcards.sample}/{wildcards.sample}.{wildcards.generegions}feature_counts \
+#           star/data/{wildcards.sample}/{wildcards.sample}.bam
+#           """)
+
+
+
+rule make_id_table:
+  input: GTF
+  output: 'ids.txt'
+  shell: r"""R -e 'library(tidyverse,quiet=T); library(rtracklayer,quiet=T);import("{input}") %>%mcols%>%as.data.frame%>% select(gene_id,gene_name)%>%distinct%>%write.table("{output}", col.names=TRUE, row.names=FALSE)'"""
+
+DISPDIFF = 0
+rule run_ribodiff:
+  input: 'feature_counts/all_feature_counts'
+  conda: '/fast/users/harnettd_c/miniconda3/envs/ribodiff/'
+  output: touch('ribodiff/.done')
+  shell: r"""Rscript ../exploration/pipeline/run_ribodiff.R {input} {DISPDIFF} $(dirname {output})"""
+
+
+
+#rule run_template:
+#  input: templatefinput
+#  output: touch('run_template/.done')
+#  shell: r"""template {input} $(dirname {output})"""
