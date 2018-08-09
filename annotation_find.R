@@ -28,9 +28,6 @@ annofile <- 'annotation/gencode.v22.annotation.gtf'%T>%{stopifnot(file.exists(.)
 
 ere_gr <- DT2GR(ere_table,seqinf=seqinfo(genome))
 
-
-
-
 read_compressed_gfile <- function(annofile,annotype,fformat='gtf'){
 	f=tempfile();
 	stopifnot(file.exists(annofile))
@@ -56,25 +53,23 @@ lincgenes <- subset(genes, gene_id %in% lncRNA_table$gene_id)
 
 #let's play with maptToTrnascripts
 
-testexons <- exons%>%head(10e3)%>%subset(transcript_id!=last(transcript_id))
+# testexons <- exons%>%head(10e3)%>%subset(transcript_id!=last(transcript_id))
 
 
-# rpls <- genes%>%subset(gene_name%>%str_detect('RPL'))
-rpls19 <- genes%>%subset(gene_name%>%str_detect('RPL'))
+# # rpls <- genes%>%subset(gene_name%>%str_detect('RPL'))
+# rpls19 <- genes%>%subset(gene_name%>%str_detect('RPL'))
 
-import('bigwigs/star_OD5P_05_uM_DAC_1_Aligned.sortedByCoord.out.bam_Ribo_coverage_plus.bw',which = rpls)%>%{strand(.)<-'+';.} %>%
-	subsetByOverlaps(rpls)%>%.$score%>%sum
+# import('bigwigs/star_OD5P_05_uM_DAC_1_Aligned.sortedByCoord.out.bam_Ribo_coverage_plus.bw',which = rpls)%>%{strand(.)<-'+';.} %>%
+# 	subsetByOverlaps(rpls)%>%.$score%>%sum
 
-import('bigwigs/star_OD5P_05_uM_DAC_1_Aligned.sortedByCoord.out.bam_Ribo_coverage_plus.bw',which = rpls)%>%{strand(.)<-'+';.} %>%
-	subsetByOverlaps(rpls19)%>%.$score%>%sum
+# import('bigwigs/star_OD5P_05_uM_DAC_1_Aligned.sortedByCoord.out.bam_Ribo_coverage_plus.bw',which = rpls)%>%{strand(.)<-'+';.} %>%
+# 	subsetByOverlaps(rpls19)%>%.$score%>%sum
 
 
 
 
 ##########Producing metaprofiles to 
-bigwigfile <- Sys.glob('bigwigs/*_Ribo_coverage_plus.bw')%>%
-	.[5]%T>%
-	{stopifnot(file.exists(.))}
+
 
 allbigwigs<-Sys.glob('bigwigs/*_Ribo_coverage_*.bw')
 
@@ -109,7 +104,7 @@ get_5p_profiles<- function(startcod_windows,bigwigpair){
 		lapply(bigwigpair,FUN=import,which = startcod_windows)%>%
 		{for(strandi in names(.)) strand(.[[strandi]]) <- strandi;.}%>%
 		Reduce(f=c,.)%>%
-		mergeByOverlaps(startcod_windows[,'transcript_id'])
+		mergeByOverlaps(startcod_windows[,'transcript_id'])%>%
 		mergeGR2DT%>%
 		transmute(tid=transcript_id,pos = start-start.1+1,score = score)%>%
 		group_by(tid)%>%
@@ -143,11 +138,11 @@ svglite(fpproffile);print(fp_profplot);dev.off()
 
 
 
-sitesovergenes <- 
-	lapply(bigwigpairlist[[1]],import,which = unlist(genes)%>%head(1000))%>%
-	{for(strandi in names(.)) strand(.[[strandi]]) <- strandi;.}%>%
-	Reduce(f=c,.)%>%
-	subset(score>0)
+# sitesovergenes <- 
+# 	lapply(bigwigpairlist[[1]],import,which = unlist(genes)%>%head(1000))%>%
+# 	{for(strandi in names(.)) strand(.[[strandi]]) <- strandi;.}%>%
+# 	Reduce(f=c,.)%>%
+# 	subset(score>0)
 
 
 summarize_ov_score <- function(genes,sitesovergenes,myfun=sum){
@@ -159,9 +154,9 @@ summarize_ov_score <- function(genes,sitesovergenes,myfun=sum){
 	.$score
 }
 
-genes$score <- summarize_ov_score(genes,sitesovergenes)
+# genes$score <- summarize_ov_score(genes,sitesovergenes)
 
-genes$score%>%table
+# genes$score%>%table
 
 
 
@@ -241,47 +236,7 @@ svglite(lociplotfile);print(transprofplot);dev.off()
 
 
 
-linctranscripts <- transcripts %>% subset(gene_id %in% lincgenes$gene_id)
 
-ranges2plot <- c(
-	ere_gr%>%setNames(.,.$ID)%>%.[,NULL]%>%split(.,names(.)),
-	exons[linctranscripts$transcript_id]%>%unlist%>%.[,NULL]%>%split(.,names(.))
-)
-
-riboprofdata <- get_riboprofdata(ranges2plot,bigwigpairlist[[pairnum]])
-
-
-
-#check there's data
-stopifnot(riboprofdata$score%>%sum%>%`>`(0))
-#now print the plot
-rangenames <- mytrans$transcript_name
-ribofilenames <- names(bigwigpairlist)[pairnum]
-#point to focus on so we can see the frame
-
-# spoint <- riboprofdata_i%>%{.$pos[.$score>median(.$score)][1]}
-#
-
-
-
-transprofplot <-
-	riboprofdata %>%
-	# mutate(score= log10(score+(0.1*(min(score))))) %>%
-	ggplot(aes(fill=frame,color=frame,x=pos,y=score))+
-	geom_bar(stat='identity')+
-	# coord_cartesian(xlim=c(spoint-50,spoint+50))+
-	ggtitle(str_interp("Riboseq Read Profile for:\n${rangename} = ${range}\nfile:${ribofilenames}"))+
-	theme_bw()
-
-transprofplotfile <- svglist('plots/loci_riboprofiles/${rangename}/${ribofilenames})
-
-
-
-
-
-
-
-"As part of his predoctoral fellowship contract, Dermot Harnett was involved in teaching the courses 'Introduction to Omics' and 'DNA and RNA biology', as well as in designing classes for the 'Basic Teaching Module' for new students."
 
 
 
