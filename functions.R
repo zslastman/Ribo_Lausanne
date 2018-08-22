@@ -1,3 +1,22 @@
+extract_id <- function(strings,ids){
+  
+  matchlist <- map(strings,~str_extract(pattern = sampleids,string = .))
+  
+  matchnum <- matchlist%>%map(~sum(!is.na(.)))
+  stopifnot(all(matchnum < 2 ))
+  stopifnot(all(matchnum > 0))
+
+  matches <- matchlist%>%map_chr(keep,Negate(is.na))
+
+  matches
+}
+load_objs <- function(f){
+    env <- new.env()
+    nms <- load(f, env)
+    map(nms,message)
+    as.list(env)
+}
+
 DT2GR = function(dt,seqinf=si,checksi=TRUE){
 
   if(is(dt,'GenomicRanges')) {

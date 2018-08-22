@@ -34,9 +34,20 @@ Rnaseq is available on them, as well as exome-seq data.
 ```I have now attached for one cell line, OD5P, the coordinates and ENSG from the genes encoding our hits, a few retroviral elements and quite a few ncRNAs. ```
 
 
+
+
 ## results
 
 ### Executive Summary
+
+ of Selected lncRNA loci show evidence for translation. In _ cases, these ORFs contain the associated peptides.
+
+ Our samples are as follows:
+
+
+ In general we see 
+
+
 
 ### Todos
 

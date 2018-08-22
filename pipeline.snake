@@ -2,6 +2,12 @@
 #
 shell.executable("bash")
 shell.prefix("set -e  pipefail;")
+
+def is_nonempty(file):
+  assert os.stat(file).st_size
+def is_over_size(file,n):
+  assert os.stat(file).st_size > n
+
 # user set parameter
 TMPDIR = '../tmp'
 SCRIPTDIR = '../git/rna_seq/scripts'
@@ -98,7 +104,7 @@ ASSAY_DICT            = tab_to_dict(SAMPLELINES, 'assay')
 GTF_DICT              = {k: CDSGTF if 'ribo' in v else GTF for k, v in ASSAY_DICT.items()}
 
 #for f in $(echo input/*); do for q in $( echo ${f}/* ); do echo $f $q; done; done | sed 's/input\///' > pipeline/sample_file.txt
-SAMPLEFASTQLINES = [line.strip().split(' ') for line in open("sample_file.txt").readlines()]
+SAMPLEFASTQLINES = [line.strip().split('\t') for line in open("sample_file.txt").readlines()]
 FASTQS = [l[1] for l in SAMPLEFASTQLINES]
 FASTQSAMPLES = [l[0] for l in SAMPLEFASTQLINES]
 FASTQSAMPLEDICT = dict(zip(FASTQS,FASTQSAMPLES))
@@ -107,7 +113,6 @@ SAMPLEFASTQDICT = {v:[i for i in FASTQSAMPLEDICT.keys() if FASTQSAMPLEDICT[i] ==
 
 #print(FASTQSAMPLES)
 #print(SAMPLES)
-
 assert set(FASTQSAMPLES) == set(SAMPLES)
 
 
@@ -164,18 +169,22 @@ clusterdata=[
 
 rule all:
   input:
-    expand("riboqc/data/{sample}/.done",sample=SAMPLES),
-    # expand("preprocessed_reads/{sample}/{sample}.fastq.gz", sample = SAMPLES),
-    #expand("processed_reads/{sample}/.done", sample = SAMPLES),
+    FASTQS,
+    [fastq.replace('input/','cutadapt_reads/') for fastq in FASTQS],
+    [fastq.replace('input/','collapse_reads/') for fastq in FASTQS],
+    [fastq.replace('input/','trim_reads/') for fastq in FASTQS],
+    expand("processed_reads/{sample}/.done", sample = SAMPLES),
     # expand("cutsequences/{sample}/cutseqs.txt.gz", sample = SAMPLES),
-    #GTF,
+    # GTF,
     # CDSFASTA,
-    # expand("rsem/data/{sample}/.done", sample = SAMPLES),
-    #expand("fastqc/data/{sample}/.done", sample = SAMPLES),
+    #expand("rsem/data/{sample}/.done", sample = SAMPLES),
+    # expand("fastqc/data/{sample}/.done", sample = SAMPLES),
     #    "fastqc/summary/fastqc_summary.tsv",
-    #k    expand("star/data/{sample}/.done", sample = SAMPLES),
+    expand("star/data/{sample}/.done", sample = SAMPLES),
     #expand("infer_experiment/data/{sample}/.done", sample = SAMPLES),
     expand("qc/data/{sample}/.done", sample = SAMPLES),
+    # expand("SaTAnn/{sample}/.done", sample = SAMPLES)[21:26],
+    expand("riboqc/reports/{sample}/riboqcreport.html", sample = SAMPLES),
     # expand("dupradar/data/{sample}/.done", sample = SAMPLES),
     # expand("htseq/data/{sample}/.done", sample = SAMPLES),
     # expand('feature_counts_readrange/data/{sample}/{generegions}/{readrange}/.done', sample=RIBO_TOTAL_DICT.keys(), generegions=GENEREGIONS+TRNAs, readrange=READRANGES),
@@ -183,7 +192,7 @@ rule all:
     # expand("feature_counts/all_feature_counts"),
     # expand("feature_counts/data/{sample}/{generegions}/{readrange}/.done", sample = SAMPLES, generegions = generegions+TRNAs, readrange = READRANGES),
     # expand("kallisto/data/{sample}/.done", sample = SAMPLES),
-#expand("bigwigs/{group}/{strand}/{istrans}.done",group = SAMPLES,strand=strands,istrans=istransvals),
+    expand("bigwigs/{group}/{strand}/{istrans}.done",group = SAMPLES,strand=strands,istrans=istransvals),
     # expand("mergedbigwigs/{group}/{strand}/{istrans}.done",group = GROUPS,strand=strands,istrans=istransvals),
     # expand("ribotaper/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
 #expand("ribotapermetaplots/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
@@ -192,8 +201,7 @@ MINREADLENGTH=20
 MAXREADLENGTH=300
 QUALLIM=20
 CUTADAPTBIN="~/bin/cutadapt"
-REMOVE8NBIN="~/bin/remove8N.pl"
-
+REMOVE8NBIN="~/bin/remove8N_twoarg.pl"
 
 
 #things this needs - cutadapt, remove8N.pl, STAR,collapse_reads.pl,seqtk
@@ -217,36 +225,36 @@ rule link_in_ref:
       """
 
 rule link_in_files:
-  input: lambda wc: SAMPLEFASTQDICT[wc['sample']]
-  output: touch('preprocessed_reads/{sample}/{fastq}')
-  run:
+  input: 'input/{sample}/{fastq}'
+  output: 'preprocessed_reads/{sample}/{fastq}'
+  run:  
     sample = wildcards['sample']
-    fastqs = SAMPLEFASTQDICT[sample]
+    fastq = wildcards['fastq']
     shell(r"""
-      set -evx
-       for fastq in $(echo {fastqs}) ;do ln -rsf $(readlink -f $fastq) preprocessed_reads/{sample}/;done
+      mkdir -p $(dirname {output})
+      ln -sf $(readlink -f input/{sample}/{fastq}) {output}
     """)
 
 
 rule cutadapt_reads:
-  input: 'input/{sample}/{fastq}'
+  input: 'preprocessed_reads/{sample}/{fastq}'
   output: 'cutadapt_reads/{sample}/{fastq}'
   run:
     sample = wildcards['sample']
-    fastqs = input
-    shell(r"""
-      set -evx
+
+    shell(r"""    #   set -evx
       
-      mkdir -p cutadapt_reads/{sample}/
-      zcat {input} \
-      | cutadapt \
-        -a TGGAATTCTCGGGTGCCAAGG \
-       --minimum-length {MINREADLENGTH} \
-       --maximum-length {MAXREADLENGTH} \
-       -q {QUALLIM} - \
-       2> cutadapt_reads/{sample}/{wildcards.fastq}.cutadaptstats.txt \
-       | gzip > cutadapt_reads/{sample}/{wildcards.fastq}
-    """)
+       mkdir -p cutadapt_reads/{sample}/
+       
+        zcat {input} \
+           | cutadapt \
+             -a TGGAATTCTCGGGTGCCAAGG \
+            --minimum-length {MINREADLENGTH} \
+            --maximum-length {MAXREADLENGTH} \
+            -q {QUALLIM} - \
+        2> cutadapt_reads/{sample}/{wildcards.fastq}.cutadaptstats.txt \
+        | gzip  > {output}
+""")
 
 rule collapse_reads:
     input: 'cutadapt_reads/{sample}/{fastq}'
@@ -258,43 +266,46 @@ rule collapse_reads:
      
        mkdir -p collapse_reads/{sample}/
      
-       zcat {input} \
+       zcat {input}  \
          | ~/bin/collapse_reads.pl {wildcards.sample} \
          2> collapse_reads/{wildcards.sample}/{wildcards.fastq}.collreadstats.txt \
-         > {output}
+         | cat > {output}
      """)
+        is_over_size(output[0],100)
 
-
+#this finds small filse
+ # find collapse_reads/ -name "*.fastq.gz" -size -100M
+# find trim_reads/ -name "*.fastq.gz" -size -10M  | xargs ls -latr
+# #this finds everything in a certain rule that's less than 10M and then quits
+# for i in $(find trim_reads/ -name "*.fastq.gz" -size -10M);do   find . -name $(dirname $i | xargs basename) | grep -v input | grep -v cutadapt; done
 rule trim_reads:
     input: 'collapse_reads/{sample}/{fastq}'
     output: 'trim_reads/{sample}/{fastq}'
     run:
         sample = wildcards['sample']
-        outfile = input[0].replace('.gz','-2xNNNN.fastq')
         shell(r"""
        set -evx
      
-       mkdir -p trim_reads/{sample}/     
+       OUTDIR=$(dirname {output})
+       mkdir -p  $OUTDIR
      
-       {REMOVE8NBIN}  {input}
+       {REMOVE8NBIN} {input} {output}
 
-       if [ ! -s {outfile} ] ; then exit; fi
-     
-       gzip -f {outfile}
+       gzip -f {output}
+       mv {output}.gz {output}
 
-       mkdir -p trim_reads/{sample}/
-       mv {outfile}.gz {output}
-       rm {input}
      """)
 
 #this rule is the 'signal spliter where we go from sample to indiv fastqs
+
 rule link_processed_reads:
   input: 
     lambda wc: [fastq.replace('input/','trim_reads/') for fastq in SAMPLEFASTQDICT[wc['sample']]]
   output: touch('processed_reads/{sample,[^/]+}/.done')
   shell:r"""
         mkdir -p processed_reads/{wildcards.sample}
-        ln -rifs $(readlink -f {input}) processed_reads/{wildcards.sample}/
+        for fastq in {input}; do [[ $(zcat $fastq | head) ]] || exit ; done 
+        ln -ifs $(readlink -f {input}) processed_reads/{wildcards.sample}/
     """
 # rule link_total_fastq:
 #   input: 'preprocessed_reads/{sample}/{sample}.fastq.gz'
@@ -329,8 +340,13 @@ rule gffread:
       # set -x
       #with filtering output all sequences
       cat {GTF_orig} \
-      | sed -r  's/((transcript_id|gene_id|protein_id|ID=\w+|Parent)\W+\w+)\.[0-9]+/\1/g' \
+      | sed -r  's/((transcript_id|gene_id|protein_id|ID|Parent|exon_id|havana_gene|havana_transcript)\W+\w+)\.[0-9]+/\1/g' \
       > {GTF}
+
+      cat {GFF_orig} \
+      | sed -r  's/((transcript_id|gene_id|protein_id|ID|Parent|exon_id|havana_gene|havana_transcript)\W+\w+)\.[0-9]+/\1/g' \
+      > {GFF}
+
 
       #needs gff - output exon sequences
       cat {GFF_orig} |  grep -P -e'\texon\t|^\#' | gffread - -F -E -g {REF} -W -w {RNAFASTA} -o /dev/null
@@ -353,23 +369,6 @@ rule gffread:
       cat {GTF_orig} | awk '{{print $1,$4,$5,"name",$6,$7}}' > {BED}
       """)
 
-
-rule make_seqc_gtf:
-  input: GTF_orig
-  output: SeQC_GTF
-  shell: r"""
-    set -x
-
-      cat {input} \
-        | grep -Pe '#|\ttranscript\t'  \
-        | sed 's/geneID/gene_id/' \
-        | sed -r  's/((transcript_id|gene_id|protein_id|ID=\w+|Parent)\W+\w+)\.[0-9]+/\1/g' \
-        | sed 's/geneID/gene_id/' \
-        | grep -P "transcript_type\W+(protein_coding|rRNA)|^\#" \
-        | sed -e '/\tgene\t/ s/gene_id \(.ENSG[0-9]*.[0-9]*..\)/\0 transcript_id \1/' \
-        > {SeQC_GTF}
-      
-      """
  
 rule make_utrs:
   input: GTF=GTF_orig
@@ -400,7 +399,11 @@ rule fastqc:
      log:'fastqc/reports/{sample}/fastqc.log'
      run:
       reads= [fq.replace('input/','processed_reads/') for fq in SAMPLEFASTQDICT[wildcards['sample']]]
-      shell(r'''wait $(for i in {reads}; do $( fastqc $i ) & done) ''')
+      shell(r'''
+          OUTDIR=$(dirname {output[0]})
+          mkdir -p $OUTDIR
+          wait $(for i in {reads}; do $( fastqc -o $OUTDIR $i ) & done) 
+        ''')
 
 rule collect_fastqc:
      input:
@@ -540,7 +543,9 @@ rule bigwigs:
         bedSort {bedgraph} {bedgraph}
         bedGraphToBigWig {bedgraph} {chromsizes} {bw}
        
+
         """)
+        is_over_size(output[0],1e6)
 
 
 def getGroupBigWigs(wildcards):
@@ -608,18 +613,18 @@ gene_transcript_map = 'gene_transcript_map.tsv'
 rule make_gene_transcript_map:
   input: GTF
   output: gene_transcript_map,transcript_gene_map
-  shell:(r"""
+  run:
+    shell(r"""
     cat {input} \
-      | awk '$3=="exon"' \
-      | grep -Po '(?<=transcript_id ").*?gene_id.*?(?=";)' \
-      | sed 's/";.*gene_id "/\t/' \
-      |  awk '{{print $1,$2}}' \
+      | grep -Pe'\ttranscript\t'  \
+      | perl -lane '/transcript_id\W+([\w\.]+)/;$t=$1; $g=/gene_id\W+([\w\.]+)/;$g=$1;print($g,"\t",$t)' \
       | sort | uniq \
-      > {transcript_gene_map}
+      > {gene_transcript_map}
 
-    cat {transcript_gene_map} \
-      | awk '{{print $2,$1}}' > {gene_transcript_map}
+    cat {gene_transcript_map} \
+      | awk '{{print $2,$1}}' > {transcript_gene_map}
     """)
+    is_nonempty(gene_transcript_map)
 
 rule rsemref:
   input:
@@ -698,7 +703,7 @@ rule qc:
      input:
           fastqc='fastqc/data/{sample}/.done',
           star='star/data/{sample}/.done',
-          refflat = SeQC_REF+".fai",
+          refflat = refflat,
           rrna_intervals = rrna_intervals,
      output:
           done=touch('qc/data/{sample}/.done'),
@@ -1009,26 +1014,35 @@ rule make_riboqc_anno:
 
 rule run_riboqc:
   input : 'riboqc/annot.done','star/data/{sample}/.done',REF
-  output: touch('riboqc/data/{sample}/.done')
+  output: 'riboqc/data/{sample}/_to_SaTAnn','riboqc/data/{sample}/_results_all_toknit'
   run:
     bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
     shell(r""" 
             mkdir -p riboqc/data/{wildcards.sample}/
             source activate riboqc
             Rscript {riboqc_script} {REF} riboqc/{ANNOBASE}.annoout {bamfile} riboqc/data/{wildcards.sample}/
+
   """)
 
 SaTAnn_script = '/fast/groups/ag_ohler/dharnet_m/satann_working/Satan_working_hg38_genc25_May8.R'
 
+rule make_chrnamefile:
+ input: GTF
+ output: 'chrnames.txt'
+ shell:r""" cut -d$'\t' -f1 {input} | uniq | sort | uniq | grep -v '#' > {input}"""
+
 rule run_satann:
-  input : 'riboqc/data/{sample}/.done'
-  output: touch('satann/{sample}/.done')
-  threads: 6
+  input : 'riboqc/data/{sample}/_to_SaTAnn'
+  output: touch('SaTAnn/{sample}/.done')
+  threads: 10
   run:
-    fcountfiles = expand("feature_counts/data/{sample}/{sample}.feature_counts", sample = SAMPLES)
     shell(r"""
 
-      {SaTAnn_script} \
+    source activate riboqc
+    
+    mkdir -p $( dirname {output})
+
+      Rscript {SaTAnn_script} \
         {REF} \
         riboqc/{ANNOBASE}.annoout \
         {threads} \
@@ -1036,8 +1050,22 @@ rule run_satann:
         $(dirname {output})/SaTAnn
 
       """)
-
-
+ribqc_report='/fast/groups/ag_ohler/dharnet_m/satann_working/riboseqc.Rmd'
+rule knit_riboqc:
+  input: 
+    riboqcoutput='riboqc/data/{sample}/_results_all_toknit',
+    ribqc_report=ribqc_report
+  output: 'riboqc/reports/{sample}/riboqcreport.html'
+  run:
+    #knitr's file path fuckery means we need to cd and hand it absolute paths, god knows where it's working directory ends up.
+    indata = os.path.abspath(input.riboqcoutput)
+    figpath = os.path.abspath(output[0]).replace('.html','')+'_fig'
+    outpath = os.path.abspath(output[0])
+    shell(r"""
+    source activate riboqc
+    cd $(dirname {output})
+    R -e 'rmarkdown::render("{input.ribqc_report}",params = list(input_list = "{indata}",input_list_names = "{wildcards.sample}", output_fig_path = "{figpath}"),output_file = "{outpath}")'
+""")
 # ule feature_counts_select:
 #      input:
 #           GTF,CDSGTF,'tputrs.gtf','fputrs.gtf','tRNAs.gtf',
@@ -1150,6 +1178,8 @@ rule run_ribodiff:
   conda: '/fast/users/harnettd_c/miniconda3/envs/ribodiff/'
   output: touch('ribodiff/.done')
   shell: r"""Rscript ../exploration/pipeline/run_ribodiff.R {input} {DISPDIFF} $(dirname {output})"""
+
+
 
 
 

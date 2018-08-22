@@ -4,6 +4,8 @@ library(Biostrings)
 library(Rsamtools)
 library(rtracklayer)
 library(GenomicFeatures)
+library(data.table)
+library(stringr)
 
 #load some utility functions
 source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/functions.R")
@@ -249,12 +251,11 @@ svglite(lociplotfile);print(transprofplot);dev.off()
 
 
 
-# readxl::read_excel('ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx')
+readxl::read_excel('ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx')
 
-# vcf <- readLines('ext_data/OD5P_mq_050718.vcf',10)
-
-
-# df$ensembl_gene_id <- gsub('\\..+$', '', df$ensembl_gene_id)
+vcfs <- Sys.glob('ext_data/*.vcf')
+#may god forgive me
+vcfgrs<-vcfs%>%map(.%>%fread%>%{colnames(.)%<>%str_replace('#','');colnames(.)[1:2]<-c('seqnames','start');.}%>%mutate(width=nchar(ALT),seqnames=paste0('chr',seqnames))%>%DT2GR(FaFile('../genomes/hg19.fa')%>%seqinfo))
 
 # library(biomaRt)
 # mart <- useDataset("hsapiens_gene_ensembl", useMart("ensembl"))
@@ -272,18 +273,35 @@ svglite(lociplotfile);print(transprofplot);dev.off()
 
 
 
-# ##______
-# #this code will lift our vcfs over to the 38 annotation
-# GRanges(
-# 	c('chr1:1-10:+',
-# 	'chr1:100-110:+',
-# 	'chr1:201-210:+',
-# 	'chr1:301-310:+')
-# )%>%{.$transcript_name='a';.}%>%
-# {.$exon_='a';.}
+##______
+#this code will lift our vcfs over to the 38 annotation
+GRanges(
+	c('chr1:1-10:+',
+	'chr1:100-110:+',
+	'chr1:201-210:+',
+	'chr1:301-310:+')
+)%>%{.$transcript_name='a';.}%>%
+{.$exon_='a';.}
 
-# chainurl = 'http://hgdownload.cse.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz'
-# chainfile = basename(chainulr)
-# system(str_interp('wget ${chainurl} -O ${chainfile}'))
-# chain <- import.chain(chainfile)
-# vcfgrs %<>% map(liftOver,chain)
+
+
+#we want to map our ORFs onto the transcript as GRs, with only necessary metadata
+
+#then do a mergeByOverlaps 
+
+#then use the position and the alt to modify the protein column
+
+#then map this back to our original data
+
+
+
+#Testomg
+firstfalse <- which(vcfpullseqs!=vcfrefannoseq)[1]
+
+
+vcfgrs[[1]][firstfalse]%>%getSeq(x=FaFile('../genomes/hg38.fa'))%>%as.character
+vcfgrs[[1]][firstfalse]
+
+
+
+orfdt
