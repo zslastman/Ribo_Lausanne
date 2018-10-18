@@ -13,7 +13,7 @@ TMPDIR = '../tmp'
 SCRIPTDIR = '../git/rna_seq/scripts'
 
 # #reference genome
-REF_orig = '../../genomes/hg38.fa'
+REF_orig = '../../genomes/hg19.fa'
 
 
 #things this needs - all sorts of shit for the R scripts....
@@ -38,13 +38,9 @@ REF_orig = '../../genomes/hg38.fa'
 
 REF = 'my_'+os.path.splitext(os.path.split(REF_orig)[1])[0]+'.fa'
 
-
-#STAR uses the rsem index
-STARINDEX = 'rsemref'
-
 # used by infer_experiment
-GTF_orig = '../annotation/gencode.v22.annotation.gtf'
-GFF_orig = '../annotation/gencode.v22.annotation.gff3'
+GTF_orig = '../annotation/gencode.v24lift37.annotation.gtf'
+GFF_orig = '../annotation/gencode.v24lift37.annotation.gff3'
 
 ANNOBASE = 'my_'+os.path.splitext(os.path.split(GTF_orig)[1])[0]
 
@@ -62,16 +58,9 @@ CDSFASTA = ANNOBASE+'.cds.fa'
 # need to think on this.... we start with a genome and a gff3 file. We add the extra transcript to our gff3 file, (optionally eliminating all others) 
 #then we create the transcript fasta file from our gff3 file, and the gtf file. Then, we use these to make salmon, and rsem/star indices
 
-# htseq parameter
-HTSEQ_MODE = 'union'
-
-
 # used by qc
 SeQC_GTF = ANNOBASE+'_SEQC_GTF'+'.gtf'
 SeQC_REF = REF
-
-
-RSEMINDEXFOLD="rsemref"
 
 SAMPLELINES = [line.strip().split(',') for line in open("sample_parameter.csv").readlines()]
 
@@ -115,8 +104,6 @@ SAMPLEFASTQDICT = {v:[i for i in FASTQSAMPLEDICT.keys() if FASTQSAMPLEDICT[i] ==
 #print(SAMPLES)
 assert set(FASTQSAMPLES) == set(SAMPLES)
 
-
-
 #the group dict is structured differently, returns a list of samples
 GROUP_DICT = tab_to_dict(SAMPLELINES,'group')
 GROUP_SAMPLES = {}
@@ -152,27 +139,32 @@ GENEREGIONS = ['gene','cds','fputrs','tputrs']
 # TRNAs = ['gencode.vM12.tRNAs.gtf.gz']
 TRNAs = ['tRNAs']
 
-READRANGES = ['25_30','1_26','27_28','29_100','1_300']
-READRANGENUM = [[25,30],[1,26],[27,28],[29,100],[1,300]]
+# READRANGES = ['25_30','1_26','27_28','29_100','1_300']
+READRANGES = ['25_31','1_300']
+# READRANGENUM = [[25,30],[1,26],[27,28],[29,100],[1,300]]
+READRANGENUM = [[25,31],[1,300]]
 READRANGEDICT = dict(zip(READRANGES,READRANGENUM))
 
 
-clustermethods = ['kmeans','tsne']
-clusterdata=[
-'cent_scaled_exprdata',
-'limma_fold_changes',
-# 'composite_fold_changes',
-# 'composite_fold_changes_ribodfilt',
-'cent_scaled_exprdata_ribodfilt',
-'limma_fold_changes_ribodfilt']
+assert set(FASTQSAMPLES) == set(SAMPLES)
+
+# assert set(ASSAY_DICT.values()) in set(['ribo','total'])
+
+satan_annot_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
+riboqc_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
+
+ribosamples=list(filter(lambda s: ASSAY_DICT[s] == 'ribo',SAMPLES))
+totalsamples=list(filter(lambda s: ASSAY_DICT[s] == 'total',SAMPLES))
+riboms_total_file='/fast/groups/cubi/projects/2017-10-10_cortexomics/gdrive/cortexomics_ms_total/325_new_2_all_log2_LFQ_n7464.txt'
+ms_spec_file='/fast/groups/cubi/projects/2017-10-10_cortexomics/gdrive/cortexomics_ms_cyt+80+Poly/proteinGroups.txt'
+
+ribofastqs=list(filter(lambda fq: FASTQSAMPLEDICT[fq] in ribosamples,FASTQS))
+totalfastqs=list(filter(lambda fq: FASTQSAMPLEDICT[fq] == totalsamples,FASTQS))
 
 
 rule all:
   input:
-    FASTQS,
-    [fastq.replace('input/','cutadapt_reads/') for fastq in FASTQS],
-    [fastq.replace('input/','collapse_reads/') for fastq in FASTQS],
-    [fastq.replace('input/','trim_reads/') for fastq in FASTQS],
+    FASTQS, GTF_orig,GFF_orig,
     expand("processed_reads/{sample}/.done", sample = SAMPLES),
     # expand("cutsequences/{sample}/cutseqs.txt.gz", sample = SAMPLES),
     # GTF,
@@ -183,7 +175,7 @@ rule all:
     expand("star/data/{sample}/.done", sample = SAMPLES),
     #expand("infer_experiment/data/{sample}/.done", sample = SAMPLES),
     expand("qc/data/{sample}/.done", sample = SAMPLES),
-    # expand("SaTAnn/{sample}/.done", sample = SAMPLES)[21:26],
+    expand("multiqc/multiqc_report.html"),
     expand("riboqc/reports/{sample}/riboqcreport.html", sample = SAMPLES),
     # expand("dupradar/data/{sample}/.done", sample = SAMPLES),
     # expand("htseq/data/{sample}/.done", sample = SAMPLES),
@@ -192,7 +184,7 @@ rule all:
     # expand("feature_counts/all_feature_counts"),
     # expand("feature_counts/data/{sample}/{generegions}/{readrange}/.done", sample = SAMPLES, generegions = generegions+TRNAs, readrange = READRANGES),
     # expand("kallisto/data/{sample}/.done", sample = SAMPLES),
-    expand("bigwigs/{group}/{strand}/{istrans}.done",group = SAMPLES,strand=strands,istrans=istransvals),
+    # expand("bigwigs/{group}/{strand}/{istrans}.done",group = SAMPLES,strand=strands,istrans=istransvals),
     # expand("mergedbigwigs/{group}/{strand}/{istrans}.done",group = GROUPS,strand=strands,istrans=istransvals),
     # expand("ribotaper/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
 #expand("ribotapermetaplots/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
@@ -296,40 +288,117 @@ rule trim_reads:
 
      """)
 
+
+
+rule make_trna_rrna_indices:
+  input: GTF
+  output: touch('filter_reads/tRNA_rRNA_index/tRNA_rRNA_index.done')
+  run:
+    outprefix = output[0].replace('.done','')
+    fafile =outprefix+'.fa'
+    shell(r"""
+      #get rRNAs and tRNAs, rename the tRNAs to exons for GenePRed,
+      #get the gene type out and stick it front of the transcript id
+      #for better names in the fasta
+      cp ../contaminants/contaminants.fa {fafile}
+
+       bowtie2-build {fafile} {outprefix} --threads {threads}
+       
+      """)
+
+rule make_bowtie_indices:
+  input: REF
+  output: touch('bowtie_index/.done')
+  threads: 8
+  run:
+    outprefix = output[0].replace('.done','')
+    fafile =outprefix+'.fa'
+    shell(r"""
+      #get rRNAs and tRNAs, rename the tRNAs to exons for GenePRed,
+      #get the gene type out and stick it front of the transcript id
+      #for better names in the fasta
+       bowtie2-build {REF} bowtie_index/ref 
+       cp {REF} bowtie_index/ref.fa
+       bowtie2-build {RNAFASTA} bowtie_index/transcriptome
+       cp {RNAFASTA} bowtie_index/transcriptome.fa 
+       
+      """)
+
+collate_idxscript = "../exploration/collate_idx.R"
+
+rule filter_tRNA_rRNA:
+    input: 
+      'trim_reads/{sample}/{fastq}',
+      'filter_reads/tRNA_rRNA_index/tRNA_rRNA_index.done'  
+      # filter_index    
+    output: 'filter_reads/{sample}/{fastq}',
+    threads: 8
+    run:
+      sample = wildcards['sample']
+      indexname = input[1].replace('.done','')
+      outdir = os.path.dirname(output[0])
+      shell(r"""
+       set -evx
+
+       [ -f {outdir} ] && rm -rf {outdir}
+     
+       mkdir -p  {outdir}
+
+      bowtie2 \
+        -x {indexname} \
+        -L 20  \
+        -p {threads}  \
+        -N 0 \
+        -U  {input[0]} \
+        --un-gz {output[0]} \
+        --no-unal \
+        2> {output[0]}.alignreport.log > {output[0]}.filtered_reads.sam
+
+
+        samtools view -bh  {output[0]}.filtered_reads.sam \
+        | samtools sort -@ {threads}  > {output[0]}.filtered_reads.bam
+
+      samtools index {output[0]}.filtered_reads.bam
+      
+      #those which mismatch twice should not be included
+      samtools view -hb {outdir}/filtered_reads.bam \
+      | bamtools filter -tag XM:2-10 -in - -out /dev/stdout \
+      | samtools view -H > {output[0]}.mm.sam
+      #>> {outdir}/unmapped.sam
+     
+      #group the idx columns stuff is from 
+      samtools idxstats {output[0]}.filtered_reads.bam \
+      | perl -lanpe 's/^(\S+)_[^_\s]+\t/$1\t/' > {output[0]}.idxtmp
+
+      #Rscript --vanilla {collate_idxscript} {output[0]}.idxtmp {indexname}.fa
+
+      samtools stats {output[0]}.filtered_reads.bam > samtools stats {output[0]}.filtered_reads.bam.stats
+
+    """)
+
 #this rule is the 'signal spliter where we go from sample to indiv fastqs
 
 rule link_processed_reads:
   input: 
-    lambda wc: [fastq.replace('input/','trim_reads/') for fastq in SAMPLEFASTQDICT[wc['sample']]]
-  output: touch('processed_reads/{sample,[^/]+}/.done')
+    lambda wc: [fastq.replace('input/','filter_reads/') for fastq in SAMPLEFASTQDICT[wc['sample']]]
+  output: touch('processed_reads/{sample,.*(ctrl|uM).*}/.done')
   shell:r"""
         mkdir -p processed_reads/{wildcards.sample}
-        for fastq in {input}; do [[ $(zcat $fastq | head) ]] || exit ; done 
-        ln -ifs $(readlink -f {input}) processed_reads/{wildcards.sample}/
+        ln -rifs $(readlink -f {input}) processed_reads/{wildcards.sample}/
     """
-# rule link_total_fastq:
-#   input: 'preprocessed_reads/{sample}/{sample}.fastq.gz'
-#   output: touch('processed_reads/{sample,.*total.*}/.done')
-#   run:
-#     sample = wildcards['sample']
-#     shell(r"""
-#       set -evx
-#       mkdir -p processed_reads/{sample}/
-#       ln -sf $(readlink -f {input}) processed_reads/{sample}/{sample}.fastq.gz
-#     # ln -rsf $(readlink -f {input}/*) processed_reads/{sample}/{sample}.fastq.gz
-#     """)
 
-# 
-# rule no_process_reads:
-#   input: lambda wc: SAMPLEFASTQDICT[wc['sample']]
-#   output: touch('processed_reads/{sample}/.done')
-#   run:
-#     sample = wildcards['sample']
-#     fastqs = SAMPLEFASTQDICT[sample]
-#     shell(r"""
-#       set -evx
-#        for fastq in $(echo {fastqs}) ;do ln -rsf $(readlink -f $fastq) processed_reads/{sample}/;done
-#     """)
+rule link_total_fastq:
+  input: 'preprocessed_reads/{sample}/{sample}.fastq.gz'
+  output: touch('processed_reads/{sample,.*(_L7|__L5$).*}/.done')
+  run:
+    sample = wildcards['sample']
+    shell(r"""
+      set -evx
+      mkdir -p processed_reads/{sample}/
+      ln -sf $(readlink -f {input}) processed_reads/{sample}/{sample}.fastq.gz
+    # ln -rsf $(readlink -f {input}/*) processed_reads/{sample}/{sample}.fastq.gz
+    """)
+
 
 ###OOOOOOkay. GFF read does some weird shit including excluding 'transcript' lines.....
 rule gffread:
@@ -420,64 +489,172 @@ rule collect_fastqc:
           2> {output.log} 
           """
 
+rule junctions:
+  input:
+    juncfiledir = '../junctionfiles/',
+    GFF = 'my_gencode.v24lift37.annotation.gff3',
+    v19anno='../annotation/gencode.v19.annotation.gtf',
+    v22anno='../annotation/gencode.v22.annotation.gtf',
+    v24anno='../annotation/gencode.v24lift37.annotation.gtf',
+  output: 'junctions/all.tsv'
+  threads: 20
+  run:
+    shell(r"""
+        Rscript ../src/junctions.R \
+          input.juncfiledir \
+          input.GFF \
+          input.v19anno\
+          input.v22anno\
+          input.v24anno\
+          $(dirname {output} )
+      """)
+    
+rule star_index:
+  input: alljuncfile='junctions/all.tsv',REF=REF
+  output: touch('starindex/.done')
+  threads: 8
+  run:
+    shell(r"""
+      STAR \
+      --runThreadN {threads} \
+      --runMode genomeGenerate \
+      --genomeDir $(dirname {output}) \
+      --sjdbFileChrStartEnd {input.alljuncfile} \
+      --genomeFastaFiles {input.REF}
+      """)  
+
+
+def get_fastqops(inputdir,read_pattern,lstring='<( zcat ',rstring=')'):
+  import glob as glob
+  #get our input files, in either paired end or single end form
+  assert '-f' in read_pattern
+  fastqops = read_pattern.split('-')[1].replace('f ','',1).strip()
+  fastqops = glob.glob(inputdir+'/'+fastqops)
+  assert fastqops
+  fastqops = ' '.join(fastqops)
+  
+  fastqops = lstring+fastqops+')'
+
+  if '-q' in read_pattern:
+    fastqops2 = read_pattern.split('-')[2].replace('q ','',1).strip()
+    fastqops2 = glob.glob(inputdir+'/'+fastqops2)
+    assert fastqops2
+    fastqops2 = ' '.join(fastqops2)
+    fastqops2 = lstring+fastqops2+')'
+    fastqops += ' ' + fastqops2
+  return(fastqops)
+
 rule star:
      input:
           fastqs='processed_reads/{sample}/.done',
-          RSEMINDEXFOLD=RSEMINDEXFOLD+'/.done',
+          STARINDEX='starindex/.done',
+          bowtie_index='bowtie_index/.done',
      output:
           done = touch('star/data/{sample,[^/]+}/.done')
      threads: 8
      run:
+          input.STARINDEX=input.STARINDEX.replace('.done','')
+          markdup = '' if ASSAY_DICT[wildcards['sample']] == 'ribo' else '-m'
+          platform = 'NotSpecified'
+          inputdir = os.path.dirname(input['fastqs'])
+          outputdir = os.path.dirname(output[0])
           read_pattern = READ_PATTERN_DICT[wildcards['sample']]
-          shell(r"""
+          fastqops = get_fastqops(inputdir,read_pattern,lstring='<( zcat ',rstring=')')
+          repdir = outputdir.replace('data','reports')
+          tophatindex =input['bowtie_index'].replace('.done','')
           
-          mkdir -p star/reports/{wildcards.sample}
-          {SCRIPTDIR}/run_my_star.sh -m -@ {threads} -i $(dirname {input.fastqs}) {read_pattern} -o $(dirname {output}) \
-          -r star/reports/{wildcards.sample} -t {TMPDIR} -l NoSharedMemory -x {RSEMINDEXFOLD} 
+          halfthreads = threads/2
+          sortmem = str(int(5000/halfthreads))+'M'
+
+          remap = '1' if ASSAY_DICT[wildcards['sample']] == 'ribo' else ''
+
+          sample = wildcards['sample']
+          shell(r"""
+            set -x
+         MY_TMP_DIR=$(mktemp -d)
+         #MY_TMP_DIR=/fast/users/dharnet_m/tmp/test
+        trap "set -x; rm -rf ${{MY_TMP_DIR}}" EXIT KILL TERM INT HUP
+
+         mkdir -p $MY_TMP_DIR
+        mkdir -p $MY_TMP_DIR/star
+        mkdir -p $MY_TMP_DIR/tophat2
+
+        #--outSAMmultNmax 20 --winAnchorMultimapNmax 50 --outFilterMultimapNmax 20 \
+
+
+        STAR \
+              --genomeDir {input.STARINDEX} \
+              --runThreadN {threads} \
+              --outSAMunmapped Within \
+              --outFilterType BySJout \
+              --outMultimapperOrder Random \
+              --alignSJoverhangMin 8 \
+              --alignSJDBoverhangMin 1 \
+              --outFilterMismatchNmax 999 \
+              --outFilterMismatchNoverLmax 0.04 \
+              --alignIntronMin 20 \
+              --alignIntronMax 1000000 \
+              --alignMatesGapMax 1000000 \
+              --genomeLoad NoSharedMemory \
+              --quantMode GeneCounts \
+              --outSAMattributes NH HI AS NM MD \
+              --outSAMtype BAM  Unsorted\
+              --outSAMattrRGline \"ID:{sample}\" \"SM:{sample}\" \"PL:{platform}\" \
+              --outFileNamePrefix ${{MY_TMP_DIR}}/star/ \
+              --outReadsUnmapped Fastx \
+              --readFilesIn {fastqops}
+              
+            source activate tophat
+
+          iftophat=
+          if [ {remap} && ${{MY_TMP_DIR}}/star/Unmapped.out.mate* ]; then
+            iftophat=true
+
+            tophat2 \
+                -p {threads} \
+                -z0 \
+                -g 100 \
+                --output-dir ${{MY_TMP_DIR}}/tophat2 \
+                --library-type fr-unstranded \
+                --no-coverage-search \
+                --transcriptome-index {tophatindex}/transcriptome \
+                {tophatindex}/ref \
+                ${{MY_TMP_DIR}}/star/Unmapped.out.mate*
+
+            umapped=${{MY_TMP_DIR}}/tophat2/unmapped.bam
+            tmapped=
+            
+            samtools merge \
+              -@ {threads}  -f \
+             ${{MY_TMP_DIR}}/all.bam \
+             ${{MY_TMP_DIR}}/star/Aligned.out.bam \
+             ${{MY_TMP_DIR}}/tophat2/*.bam
+          else
+            cp ${{MY_TMP_DIR}}/star/Aligned.out.bam ${{MY_TMP_DIR}}/all.bam
+          fi
+          
+         samtools sort \
+          -@ {halfthreads}\
+          -m {sortmem} \
+          -T ${{MY_TMP_DIR}} \
+          -o {outputdir}/{sample}.bam \
+          ${{MY_TMP_DIR}}/all.bam
+      
+        samtools index {outputdir}/{sample}.bam 
+
+        mkdir -p {repdir}
+        samtools stats {outputdir}/{sample}.bam > {repdir}/{sample}.bamstats.txt
+        samtools flagstat {outputdir}/{sample}.bam > {repdir}/{sample}.flagstat.log
+        samtools idxstats {outputdir}/{sample}.bam > {repdir}/{sample}.idxstats.log
+        
+        cp  ${{MY_TMP_DIR}}/star/ReadsPerGene.out.tab {outputdir}/ReadsPerGene.out.tab
+        cp  ${{MY_TMP_DIR}}/star/{{Log,SJ}}* {repdir}/
+        if [ $iftophat ] ;then cp ${{MY_TMP_DIR}}/tophat2/align_summary.txt {repdir} ;fi
+
           """)
           
-rule cutsite_kmers:
-  input: 'star/data/{sample}/.done',REF
-  output: 'cutsequences/{sample}/cutseqs.txt.gz'
-  threads: 8
-  run:
-    bam = input[0].replace('.done','[^r][^i][^p][^t].bam')
-    chromsizes = 'cutsequences/'+wildcards['sample']+'/chrsizes'
-    halfKMERSIZE = KMERSIZE/2
-    shell(r"""
-        set -evx
-        samtools view -H {input} | grep "SQ" | sed -r 's/^@SQ\s+SN://' | sed -r "s/\s+LN:/\t/" > {chromsizes} 
-        mkdir -p cutsequences/{wildcards.sample}
-
-        samtools view -bF 0x10 {bam} \
-          | bedtools bamtobed -i stdin | head -n 100000 \
-          | bedtools intersect -a /dev/stdin -b {CDSGTF} -u \
-          | awk -v OFS="\t" '{{print $1,$2-{halfKMERSIZE},$2+{halfKMERSIZE}}}' \
-          | bedtools getfasta -bed - -fi {REF} -fo /dev/stdout -s \
-          | grep -v ">"  | sort | uniq -c  | gzip > {output}
-       
-
-        samtools view -bF 0x10 {bam} \
-          | bedtools bamtobed -i stdin | head -n 100000 \
-          | bedtools intersect -a /dev/stdin -b {CDSGTF} -u \
-          | awk -v OFS="\t" '{{print $1,$3-{halfKMERSIZE},$3+{halfKMERSIZE}}}' \
-          |bedtools getfasta -bed - -fi {REF} -fo /dev/stdout -s \
-          | grep -v ">"  | sort | uniq -c  | gzip > {output}.right.gz
-
-          # |bedtools slop -i - -b -{halfKMERSIZE} -g {chromsizes}  \
-          # |bedtools flank -b {KMERSIZE} -i /dev/stdin -g {chromsizes} \
-          # | awk 'NR%2==0' 
-
-        # bedtools bamtobed -i {bam} \
-        #   |grep '+$' \
-        #   |bedtools intersect -a /dev/stdin -b {CDSGTF} -u \
-        #   |bedtools slop -i - -b -{halfKMERSIZE} -g {chromsizes}  \
-        #   |bedtools flank -b {KMERSIZE} -i /dev/stdin -g {chromsizes} \
-        #   |awk 'NR%2==1'  \
-        #   |bedtools getfasta -bed /dev/stdin -fi {REF} -fo /dev/stdout -s \
-        #   | grep -v ">"  | sort | uniq -c  | gzip > {output}.right.gz
-  """)
-
+          
+         
 
 
 # TESTSECTION="1:1-1260071"
@@ -626,58 +803,6 @@ rule make_gene_transcript_map:
     """)
     is_nonempty(gene_transcript_map)
 
-rule rsemref:
-  input:
-    GTF=GTF,
-    REF=REF,
-    gene_transcript_map=gene_transcript_map
-  threads: 10
-  output:
-    touch(RSEMINDEXFOLD+'/.done')
-  run: 
-    shell(r"""
-
-      set -ex      
-
-      mkdir -p {RSEMINDEXFOLD}      
-
-      rsem-prepare-reference -p {threads} --gtf {input.GTF} \
-                              --transcript-to-gene-map {input.gene_transcript_map} \
-                              --star  \
-                              {input.REF} \
-                              {RSEMINDEXFOLD}/{ANNOBASE}
-
-      """) 
-
-rule rsem:
-     input:
-          'star/data/{sample}/.done',
-          RSEMINDEXFOLD+'/.done'
-     output:
-          done = touch('rsem/data/{sample}/.done')
-     threads: 8
-     run:
-        frag_length_mean = FRAG_LENGTH_MEAN_DICT[wildcards['sample']]
-        indexname = RSEMINDEXFOLD+'/'+(os.path.basename(GTF).replace('.gtf',''))
-
-        frag_length_sd = FRAG_LENGTH_SD_DICT[wildcards['sample']]
-
-        shell(r"""
-        set -e
-
-        rm -rf $(dirname {output})
-        mkdir -p $(dirname {output})
-        rm -rf rsem/reports/{wildcards.sample}
-        mkdir -p rsem/reports/{wildcards.sample}
-
-
-        {SCRIPTDIR}/run_my_rsem.sh -@ {threads} \
-        -b star/data/{wildcards.sample}/{wildcards.sample}.star_transcript.bam \
-        -o $(dirname {output}) -r rsem/reports/{wildcards.sample} -t {TMPDIR} \
-        -x $(echo {RSEMINDEXFOLD}/*grp | sed s/.grp//) \
-        -f {frag_length_mean} -d {frag_length_sd} \
-        # &> rsem/reports/{wildcards.sample}/{wildcards.sample}.rsem.log
-        """)
 
 rrna_intervals = 'qc/picard_rrna_intervals.txt'
 refflat = 'qc/'+ANNOBASE+'.refflat'
@@ -743,73 +868,6 @@ rule qc:
 
           """)
      
-     
-rule dupradar:
-    input:
-        'star/data/{sample}/.done'
-    output:
-        touch('dupradar/data/{sample}/.done')
-    run:
-        library = LIBRARY_DICT[wildcards['sample']]
-        paired = 'TRUE' if library == 'PAIRED' else 'FALSE'
-
-        protocol = PROTOCOL_DICT[wildcards['sample']]
-        map_protocol = { 'no': 0, 'yes': 1, 'reverse': 2 }
-        stranded = map_protocol[protocol]
-
-        shell(r"""
-        module unuse /fast/projects/cubit/current/tools/easybuild/modules/all
-        module use /fast/projects/cubit/wip_oliver/tools/easybuild/modules/all
-        module purge
-        module load dupRadar/1.4.0-foss-2015a-R-3.2.4
-
-        outdir=$(dirname {output})
-        id={wildcards.sample}
-        bam=$(dirname {input})/${{id}}.bam
-        threads=8
-
-        mkdir -p $outdir
-        
-        Rscript --vanilla {SCRIPTDIR}/dupradar.R \
-            $bam \
-            $id \
-            {GTF} \
-            {stranded} \
-            {paired} \
-            $threads \
-            $outdir
-        """)
-
-RIBOTAPERDIR="$HOME/Applications/ribotaper-1.3.1a/scripts/"
-RIBOTAPERANNOTDIR="Ribotaper_annot"
-
-rule make_ribotaper_annot:
-  input: GTF_orig = '/fast/projects/cubit/0.12.0/static_data/annotation/GENCODE/M12/GRCm38/gencode.vM12.annotation.gtf'
-  output: touch(RIBOTAPERANNOTDIR+"/.done")
-  run:
-    shell(r"""
-      set -ex
-
-      mkdir -p {RIBOTAPERANNOTDIR}
-      {RIBOTAPERDIR}/create_annotations_files.bash $(readlink -f {input.GTF_orig}) $(readlink -f {REF}) 'false' 'false' {RIBOTAPERANNOTDIR}
-      """)
-
-rule make_ribotaper_metaplots:
-  input:
-    annodir = RIBOTAPERANNOTDIR+"/.done",
-    ribobam = "star/data/{sample}/{sample}.bam"
-  output:
-    touch('ribotapermetaplots/{sample}/.done')
-  run:
-    startstopbed=RIBOTAPERANNOTDIR+'/start_stops_FAR.bed'
-    shell(r"""
-      mkdir -p ribotapermetaplots/{wildcards.sample}
-      bed=$(readlink -f {startstopbed})
-      bam=$(readlink -f {input.ribobam})
-      cd ribotapermetaplots/{wildcards.sample}
-      rm -rf metaplots
-      {RIBOTAPERDIR}/create_metaplots.bash $bam $bed {wildcards.sample}
-      """)
 
 
 #this is going to count reads in each library over 5'UTRS, CDS, and 3' UTRs
@@ -1066,6 +1124,7 @@ rule knit_riboqc:
     cd $(dirname {output})
     R -e 'rmarkdown::render("{input.ribqc_report}",params = list(input_list = "{indata}",input_list_names = "{wildcards.sample}", output_fig_path = "{figpath}"),output_file = "{outpath}")'
 """)
+
 # ule feature_counts_select:
 #      input:
 #           GTF,CDSGTF,'tputrs.gtf','fputrs.gtf','tRNAs.gtf',

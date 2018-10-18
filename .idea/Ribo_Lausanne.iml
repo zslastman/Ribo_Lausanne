@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<module type="PYTHON_MODULE" version="4">
+  <component name="NewModuleRootManager">
+    <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/.snakemake" />
+      <excludeFolder url="file://$MODULE_DIR$/annotation" />
+      <excludeFolder url="file://$MODULE_DIR$/contaminants" />
+      <excludeFolder url="file://$MODULE_DIR$/ext_data" />
+      <excludeFolder url="file://$MODULE_DIR$/input" />
+      <excludeFolder url="file://$MODULE_DIR$/pipeline" />
+      <excludeFolder url="file://$MODULE_DIR$/pipeline_copy" />
+      <excludeFolder url="file://$MODULE_DIR$/plots" />
+      <excludeFolder url="file://$MODULE_DIR$/tmp" />
+    </content>
+    <orderEntry type="inheritedJdk" />
+    <orderEntry type="sourceFolder" forTests="false" />
+    <orderEntry type="library" name="R Skeletons" level="application" />
+    <orderEntry type="library" name="R User Library" level="project" />
+  </component>
+  <component name="TestRunnerService">
+    <option name="PROJECT_TEST_RUNNER" value="Unittests" />
+  </component>
+</module>
