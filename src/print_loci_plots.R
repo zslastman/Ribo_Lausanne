@@ -143,7 +143,7 @@ for (rangename in names(ranges_with_goodorf)){
 
 	plottitle <- str_interp("Riboseq Read Profile for:\n${rangename} = ${range}\n")		
 
-	trexons <- GRanges(rangename,IRanges(c(1,cumsum(width(range))[-length(range)]+1),cumsum(width(range))))
+	trexons <- 
 	exontrack<-
 		trexons%>%
 		{AnnotationTrack(name='exons',col='black',fill='yellow',strand='*',genome=genome,id=paste0('exon_',seq_along(.)),showFeatureId=TRUE,
@@ -153,15 +153,9 @@ for (rangename in names(ranges_with_goodorf)){
 	#name the plot file
 	transprofplotfile <- str_interp('plots/loci_riboprofiles/${rangename}_prof')
 #		transprofplotfile%<>%str_replace_all('[^a-zA-z0-9_\\./]+','')
-	#print the plot
+
 	orfs <- linc_orfs_dt_with_linctable%>%subset(seqnames==rangename)
-	stopifnot(length(orfs)>0)
-	plotstart <- orfs$start%>%min
-	plotend <- orfs$end%>%max
-	orfswidth <- plotend-plotstart
-	plotstart = max(0,plotstart - (orfswidth))
-	plotend = min(rangelength,plotend + (orfswidth))
-	plotgenomewindow <- GRanges(rangename,IRanges(plotstart,plotend))%>%split(.,seqnames(.))
+	
 	
 
 	#select which tracks to show
@@ -169,11 +163,13 @@ for (rangename in names(ranges_with_goodorf)){
 		extract_oneof(cellnames)%>%
 		is_in(extract_oneof(orfs$sample,cellnames))
 
+	#ribotrack is 
 	ribotracks <- bigwigpairlist[whichwigs]%>%
 		# .[10:11]%>%
 		# map(~get_riboproftrack(range%>%split(.,names(.)),.,rangename))
 		map(~get_riboproftrack(plotgenomewindow,.,rangename))
 
+	
 	# add_legendtrack <- function(ribotracks){
 	# 	l<-length(ribotracks)
 
@@ -185,11 +181,13 @@ for (rangename in names(ranges_with_goodorf)){
 	# }
 	# ribotracks %<>% add_legendtrack
 
+	#open pdf file	
 	mypdfdev(transprofplotfile)
+	
 	plotTracks(main=plottitle,cex.main=0.5,
-		from=plotstart,to=plotend,
+		from=plotstart,to=plotend,#zoomed in on the orf in question
 		c(
-			ribotracks,
+			ribotracks, # plot the riboseq signal
 			exontrack,
 			orftrack,
 			GenomeAxisTrack(range=GRanges(rangename,IRanges(0,rangelength)),id=rangename)

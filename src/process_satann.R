@@ -13,6 +13,8 @@ slice<-dplyr::slice
 filter<-dplyr::filter
 filter<-dplyr::filter
 
+source('../src/functions.R')
+
 extract_id <- function(strings,ids){
 	
 	matchlist <- map(strings,~str_extract(pattern = sampleids,string = .))
@@ -27,23 +29,18 @@ extract_id <- function(strings,ids){
 }
 
 
-satanfiles <- Sys.glob('pipeline/SaTAnn/*/*Final_ORFs*')
-# }
-#let's look at the scores for our 
+
+#initiaal form when testing
+#let's look at the scores for our
+cell_lines<-c('OD5P','OMM','ONVC') 
+satannfiles <- Sys.glob('./../pipeline/SaTAnn/*/*Final_ORFs*')
 satannorfs <- 
-	satanfiles%>%
-	setNames(.,extract_id(.))%>%
+	# Sys.glob('SaTAnn/*/*Final_ORFs*')%>%
+	satannfiles%>%
+	setNames(.,basename(dirname(.)))%>%
 	mclapply(load_objs)
 
 
-# library(assertthat)
-# #let's look at the scores for our 
-# satannorfs <- 
-# 	Sys.glob('./pipeline/SaTAnn_lnconly/OD5P*/*Final_ORFs*') %>%
-# 	setNames(.,extract_id(.))%>%
-# 	mclapply(load_objs)
-
-#TODO_ what are these Granges columsn???
 #now filter out the weird GRanges columns, for now, and aggregate into one data table 
 all_orfs <- satannorfs%>%map(.%>%.$ORFs_tx)
 
@@ -79,6 +76,6 @@ satann_summary_table <- genetypehits%>%left_join(readthroughs)
 
 satann_summary_table%>%write_tsv('satann_summary.tsv'%T>%{message(normalizePath(.))})
 
-
+i
 
 satannorfs[[1]]$ORFs_tx[,c('gene_biotype','gene_id')]%>%mcols%>%as.data.frame

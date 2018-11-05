@@ -15,7 +15,6 @@ suppressMessages(library(GenomicAlignments))
 message('...done')
 
 #load arguments
-getwd()
 args <- c(
 	juncfiledir = '../ext_data/junctionfiles/',
   	GFF = 'my_gencode.v24lift37.annotation.gff3',
@@ -29,6 +28,7 @@ for(i in names(args)) assign(i,args[i])
 
 
 dir.create(outputfolder,showWarn=T)
+outputfolder <- paste0(outputfolder,'/')
 
 read_compressed_gfile <- function(annofile,annotype,fformat='gtf'){
 	f=tempfile();
@@ -44,7 +44,7 @@ read_compressed_gfile <- function(annofile,annotype,fformat='gtf'){
 library(rtracklayer)
 dplyr::select->select
 dplyr::filter->filter
-
+GFF%>%file.exists
 allanno <- GenomicFeatures::makeTxDbFromGFF(GFF)
 introns<-intronsByTranscript(allanno,use=T)
 
@@ -53,7 +53,7 @@ gffbase <- (tools::file_path_sans_ext(basename(GFF)))
 introns%>%
 	unlist%>%
 	{data_frame(chromosome=as.character(seqnames(.)),start=start(.),end=end(.))}%>%
-	write_tsv(col_names=FALSE,paste0('junction_exons/',gffbase,'.tsv')) 
+	write_tsv(col_names=FALSE,paste0(outputfolder,gffbase,'.tsv')) 
 
 
 ####Now the junction files
@@ -77,7 +77,7 @@ genechrs <-
 	distinct(seqnames,gene_id)
 
 
-testj<-mclapply(juncfiles%>%str_subset('hits'),function(juncfile){
+junctiongrlist<-mclapply(juncfiles,function(juncfile){
 	message(juncfile)
 	juncid <- juncfile%>%basename%>%tools::file_path_sans_ext()
 	juncdat <- fread(juncfile)
@@ -156,14 +156,14 @@ testj<-mclapply(juncfiles%>%str_subset('hits'),function(juncfile){
 	)
 })
 
-
 mergedjunctionexons <- junctiongrlist%>%map(1)%>%Reduce(f=c)%>%sort
 mergedjunctionintrons <- junctiongrlist%>%map(2)%>%Reduce(f=c)%>%sort
 tsvfiles <- junctiongrlist%>%map(3)
 
-dir.create(showWarnings = F,rec=TRUE,'junction_exons')
-export(mergedjunctionexons,paste0('junction_exons/','all','.gtf')) 
-export(mergedjunctionintrons,paste0('junction_exons/','allintrons','.gtf')) 
+dir.create(showWarnings = F,rec=TRUE,outputfolder)
+export(mergedjunctionexons,paste0(outputfolder,'all','.gtf')) 
+export(mergedjunctionintrons,paste0(outputfolder,'allintrons','.gtf')) 
+
 
 
 mcols(mergedjunctionexons)[,c('gene_id','transcript_id')]%>%as.data.frame%>%write_tsv('junction_gene_transcript_map.tsv')
@@ -171,146 +171,23 @@ mcols(mergedjunctionexons)[,c('gene_id','transcript_id')]%>%as.data.frame%>%writ
 
 # system("find junction_exons/ | grep -v 'all.gtf' | xargs cat > junction_exons/all.gtf")
 alltsvstr <- paste0(tsvfiles,collapse=' ')
-system(str_interp("cat ${alltsvstr}| sort | uniq | grep -ve start > junction_exons/all.tsv")
+system(str_interp("cat ${alltsvstr}| sort | uniq | grep -ve start > junction_exons/all.tsv"))
 
-getwd()
 
 source('../functions.R')
 
-alljsdt <- mergedjunctionexons%>%GR2DT
-
-juncs<-fread('junction_exons/all.tsv')
-juncs <- juncs%>%subset(V1=='chr1')%>%arrange(V2)%>%as_data_frame%>%distinct
-juncs <- GRanges(juncs[[1]],IRanges(juncs[[2]],juncs[[3]]))
 
 
-junctionbams <- Sys.glob('star/data/*/*bam')%>%
-	discard(~str_detect(.,'transcript'))%>%
-	# .[[3]]
-	identity
-bamnames <- junctionbams%>%basename%>%tools::file_path_sans_ext()%>%setNames(junctionbams)
-junctionbams%<>%setNames(bamnames)
-
-testjunctables<-Sys.glob('junction_exons/junction*.tsv')%>%setNames(.,basename(.))
 
 
-hits<-mergedjunctionintrons%>%subset(ID%>%str_detect('junction_diff_hits'))
-
-
+testjuncs <- import('junctions/junction_diff_hits.gtf')%>%subset(type=='exon')%>%split(.,.$transcript_id)%>%lapply(gaps)%>%lapply('[',2)%>%GRangesList%>%unlist
 
 uniqueintrons <- mergedjunctionintrons%>%unique
 uniqueintrons$id_in_unique <- seq_along(uniqueintrons)
 mergedjunctionintrons$id_in_unique <- match(mergedjunctionintrons,uniqueintrons)
-juncgr<-uniqueintrons
 
+#save these 
+mcols(mergedjunctionintrons)[,c('ID','id_in_unique')]%>%as.data.frame%>%write_tsv('junctions/id_unique.txt')
 
+uniqueintrons%>%saveRDS('junctions/uniqueintrons.rds')
 
-# juncgr<-test
-# junctionbam <- junctionbams[33]
-# juncgr <- testj[[1]][[2]]
-#ignore the new samples,, for now....
-junctionbams<-junctionbams[junctionbams%>%str_detect('ctrl\\dL')%>%not]
-
-bamcounts <- mclapply(mc.cores=20,
-	junctionbams,juncgr,FUN=function(junctionbam,juncgr){
-# bamcounts <- mclapply(junctionbams,juncgr,FUN=function(junctionbam,uniqueintrons){
-	param <- ScanBamParam(
-		flag=scanBamFlag(isSecondaryAlignment=FALSE),what=c("mapq"),
-		which=juncgr%>%resize(1),
-		tag = "MD"
-	)
-	reads <- readGAlignments(BamFile(file=junctionbam, yieldSize=NA),param = param)
-	#summary gr of the junctions and their scores
-	readjuncs <- summarizeJunctions(reads)
-	#match predicted juctnions to those in reads
-	juncmatch <- match(juncgr%>%{strand(.)='*';.},readjuncs)
-	#assign count
-	ifelse(
-		as.vector(strand(juncgr)=='+'),
-		readjuncs$plus_score[juncmatch],
-		readjuncs$minus_score[juncmatch]
-	)
-})
-stopifnot(bamcounts%>%map_lgl(is.null)%>%any%>%not)
-tbamcounts%>%map_lgl(is.null)%>%which
-
-bamcounts->bamcountsbak
-
-bamcounts %<>% simplify2array
-bamcounts%<>%apply(2,function(x){x[is.na(x)]<-0;x})
-bamcounts%<>%as_data_frame
-bamcounts%<>%mutate(id_in_unique=juncgr$id_in_unique)
-
-
-stop()
-
-
-fintrons <- mergedjunctionintrons%>%subset(ID%>%str_detect('junction_diff_hits'))
-
-jmatch <- match(hits$id_in_unique,juncgr$id_in_unique)
-hitcounts <- bamcounts[jmatch,]
-
-
-
-
-###First deal with our hits
-hittable<-juncfiles%>%str_subset('hits')%>%fread
-hittable$ID%<>%as.character
-hits$ID<-hits$ID%>%str_replace('.*_','')
-
-
-
-hittable%<>%
-	left_join(distinct(data_frame(ID=hits$ID,id_in_unique=hits$id_in_unique)),by='ID')%>%
-	left_join(distinct(bamcounts),by='id_in_unique')%>%
-	select(-id_in_unique)%>%
-	identity
-
-hittable$anyOD5P <- hittable%>%select(one_of(bamnames%>%str_subset('OD5P')))%>%as.matrix%>%array_branch(1)%>%map_lgl(~any(.>0))
-hittable$any <- hittable%>%select(one_of(bamnames))%>%as.matrix%>%array_branch(1)%>%map_lgl(~any(.>0))
-
-hittable%>%write_tsv('spliced_peptide_hits_with_od5pcounts.tsv'%T>%message)
-mergedjunctionexons%>%
-	subset(str_detect(ID,'junction_diff_hits'))%>%
-	export('../junctionfiles/junction_diff_hits.gtf')
-
-
-hittable<-read_tsv('spliced_peptide_hits_with_od5pcounts.tsv')
-
-
-#now output counts in each 
-
-# maxjunc <- readjuncs%>%.[which.max(.$score)]
-
-# juncs%>%subsetByOverlaps(resize(maxjunc,width(maxjunc)+300,'center'))
-
-
-# end(fpexons%>%subset(strand=='+')) - start(tpexons%>%subset(strand=='+'))
-# end(fpexons%>%subset(strand=='-')) - start(tpexons%>%subset(strand=='-'))
-# ifelse(juncdat$gene_strand=='-',end(tpexons),start(tpexons))- ifelse(juncdat$gene_strand=='-',start(fpexons),end(fpexons))
-
-# 
-
-# library(Rsamtools)
-
-# fpexons <- ifelse(juncdat[['gene_strand']]=='-',juncex2,juncex1)
-# tpexons <- ifelse(juncdat[['gene_strand']]=='-',juncex1,juncex2)
-
-# juncexseq1<-getSeq(x=FaFile('../../genomes/hg19.fa'),juncex1)%>%setNames(NULL)
-# juncexseq2<-getSeq(x=FaFile('../../genomes/hg19.fa'),juncex2)%>%setNames(NULL)
-
-
-# # junctiongr <- GRanges(juncdat[[1]],IRanges(nchar(fpexons),w=rep(2,length(fpexons))))
-
-
-
-# str(
-#  mapply(F=paste0,
-#  	fpexons,tpexons
-#  	)
-#  )
-
-
-
-
-# translate(juncexseq1)

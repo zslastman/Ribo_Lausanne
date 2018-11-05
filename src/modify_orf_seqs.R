@@ -16,47 +16,46 @@ filter<-dplyr::filter
 
 source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/functions.R")
 
-fafile <- 'pipeline/my_hg38.fa'%T>%{stopifnot(file.exists(.))}
-mygenome = FaFile(fafile)
+#load arguments
+args <- c(
+	vcffile = '../ext_data/vcfs_october_2018/vcfs/0D5P_M11_240517/M11_mq_240517.vcf',
+	orfobjectfile = 'satann/data/test/SaTAnn_ORFs_files',
+	genome = 'my_hg19.fa',
+	outputfile = ''
+)
+args <- commandArgs(trailingOnly=TRUE)[1:length(args)]%>%setNames(names(args))
+for(i in names(args)) assign(i,args[i])
 
-args <- commandArgs(trailing=T)%T>%message
-satanfiles <- Sys.glob(paste0(args[1],'/*/*Final_ORFs*'))
-stopifnot(length(satanfiles)>0)
-# orfsgenome[1]
-# vcfgr[1]
+outputfolder<-dirname(outputfile)
+outputfolder <- paste0(outputfolder,'/')
+outputfolder%>%dir.create(showWarn=F,rec=TRUE)
+
+genome%T>%{stopifnot(file.exists(.))}
+genome = Rsamtools::FaFile(genome)
+
 #now we need to apply this function to each of the ORFs found in relevant cell lines
 
 #############Get our vcf data
-vcfs <- Sys.glob('ext_data/*.vcf')
-#may god forgive me
-vcfgrs<-vcfs%>%map(.%>%fread%>%{colnames(.)%<>%str_replace('#','');colnames(.)[1:2]<-c('seqnames','start');.}%>%mutate(width=nchar(ALT),seqnames=paste0('chr',seqnames))%>%DT2GR(FaFile('../genomes/hg19.fa')%>%seqinfo))
-chainurl = 'http://hgdownload.cse.ucsc.edu/goldenPath/hg19/liftOver/hg19ToHg38.over.chain.gz'
-chainfile = basename(chainurl)
-# system(str_interp('wget ${chainurl} -O ${chainfile}'))
-# system(str_interp('gunzip ${chainfile}'))
-chainfile = str_replace(chainfile,'.gz','')
-chain <- import.chain(chainfile)
+vcfgr<-
+	vcffile%>%
+	fread%>%
+	{colnames(.)%<>%str_replace('#','');colnames(.)[1:2]<-c('seqnames','start');.}%>%
+	mutate(width=nchar(ALT),seqnames=paste0('chr',seqnames))%>%
+	DT2GR(seqinf=genome%>%seqinfo)
 
 # vcfgrs %<>% map(. %>% .[.$INFO=='SNP'])
 # vcfgrs %<>% map(. %>% .[nchar(.$REF)==1])
 # vcfgrs %<>% map(. %>% .[nchar(.$ALT)==1])
-vcfgrs %<>% map(.%>%setNames(.,.$ID))
-vcfgrs %<>% map(liftOver,chain)
-vcfgrs %<>% map(unlist)
-vcfgrs	%<>%map(~.[names(.)%>%table%>%keep(~.==1)%>%names])
+vcfgr %<>% setNames(.,.$ID)
 
-vcfpullseqs <- vcfgrs%>%map(unlist)%>%.[[1]]%>%getSeq(x=FaFile('../genomes/hg38.fa'))%>%as.character
+vcfpullseqs <- vcfgr%>%getSeq(x=genome)%>%as.character
 
-vcfrefannoseq <- vcfgrs%>%map(unlist)%>%.[[1]]%>%.$REF
-vcfaltannoseq <- vcfgrs%>%map(unlist)%>%.[[1]]%>%.$ALT
+vcfrefannoseq <- vcfgr$REF
+vcfaltannoseq <- vcfgr$ALT
 
 #AHA - sometimes the variant is just the new genome's 
-# table(vcfpullseqs==vcfrefannoseq)
+table(vcfpullseqs==vcfrefannoseq)
 stopifnot(all((vcfpullseqs==vcfrefannoseq)||(vcfpullseqs==vcfaltannoseq)))
-
-cell_lines <- vcfs%>%str_extract('(?<=/).*?(?=_)')
-
-names(vcfgrs) <- cell_lines
 
 #map the vcfs onto the relevant transcripts, then work out the overlaps, then modify teh strings
 
@@ -134,34 +133,18 @@ injectSNPsIndels <- function(orfsgenome,vcfgr,genome){
 }
 
 
+vcfname <-basename(vcffile)
 
-# testmut<-vcfgr[1]%>%{GRanges('chrY',IRanges(end(orfsgenome[137073])-1,end(orfsgenome[137073])-1), ALT='C' )}
-# testorf<-orfsgenome[137073]
-# injectSNPsIndels(testorf,testmut,genome)
+for(celllinefile in celllinefiles){
+	satandata <- load_objs(orfobjectfile)$ORFs_gen
+	snpinject <- injectSNPsIndels(satandata,vcfgr,mygenome)
+	stop()
+	seqs <- snpinject$seqs
 
-cell_lines_short <- cell_lines%>%
-	map(str_extract,c('OD5P','OMM','ONVC')) %>%
-	map_chr(keep,Negate(is.na))
+	dnafile <- file.path(outputfolder,paste0('cell_line','_','celllinefile.fa'))%T>%message
+	writeXStringSet(seqs,dnafile)
+	protfile <- file.path(outputfolder,paste0('cell_line','_','celllinefile.prot.fa'))%T>%message
+	writeXStringSet(translate(seqs),protfile)
 
-names(vcfgrs) <- cell_lines_short
-
-satancell_lines <-satanfiles%>%
-	map(str_extract,c('OD5P','OMM','ONVC'))%>%
-	map_chr(keep,Negate(is.na))
-
-modified_seq_dir <- 'Modified_seqs'%T>%dir.create(showWarn=T)
-for(cell_line in cell_lines_short){
-	vcfgr <- vcfgrs[[cell_line]]
-	celllinefiles <- satanfiles[satancell_lines==cell_line]
-	for(celllinefile in celllinefiles){
-		satandata <- load_objs(celllinefile)$ORFs_gen
-		snpinject <- injectSNPsIndels(satandata,vcfgr,mygenome)
-		seqs <- snpinject$seqs
-
-		dnafile <- file.path(modified_seq_dir,paste0('cell_line','_','celllinefile.fa'))%T>%message
-		writeXStringSet(seqs,dnafile)
-		protfile <- file.path(modified_seq_dir,paste0('cell_line','_','celllinefile.prot.fa'))%T>%message
-		writeXStringSet(translate(seqs),protfile)
-
-	}
 }
+

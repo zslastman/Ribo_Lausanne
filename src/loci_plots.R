@@ -6,166 +6,35 @@ library(rtracklayer)
 library(GenomicFeatures)
 library(stringr)
 library(data.table)
-
-load_objs <- function(f){
-    env <- new.env()
-    nms <- load(f, env)
-    map(nms,message)
-    as.list(env)
-}
-
-# Multiple plot function
-#
-# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
-# - cols:   Number of columns in layout
-# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
-#
-# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
-# then plot 1 will go in the upper left, 2 will go in the upper right, and
-# 3 will go all the way across the bottom.
-#
-multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
-  library(grid)
-
-  # Make a list from the ... arguments and plotlist
-  plots <- c(list(...), plotlist)
-
-  numPlots = length(plots)
-
-  # If layout is NULL, then use 'cols' to determine layout
-  if (is.null(layout)) {
-    # Make the panel
-    # ncol: Number of columns of plots
-    # nrow: Number of rows needed, calculated from # of cols
-    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
-                    ncol = cols, nrow = ceiling(numPlots/cols))
-  }
-
- if (numPlots==1) {
-    print(plots[[1]])
-
-  } else {
-    # Set up the page
-    grid.newpage()
-    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
-
-    # Make each plot, in the correct location
-    for (i in 1:numPlots) {
-      # Get the i,j matrix positions of the regions that contain this subplot
-      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
-
-      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
-                                      layout.pos.col = matchidx$col))
-    }
-  }
-}
-
-
-#very similiar to above but reutrns the spec value as welll as the ftest
-take_Fvals_spect<-function(x,n_tapers,time_bw,slepians_values){
-     if(length(x)<25){
-          remain<-50-length(x)
-          x<-c(rep(0,as.integer(remain/2)),x,rep(0,remain%%2+as.integer(remain/2)))
-     }
-     if(length(x)<1024/2){padding<-1024}
-     if(length(x)>=1024/2){padding<-"default"}
-
-     #this calculates a frequency object from a numeric vector using the 
-     resSpec1 <- spec.mtm(as.ts(x), k=n_tapers, nw=time_bw, nFFT = padding, centreWithSlepians = TRUE, Ftest = TRUE, maxAdaptiveIterations = 100,returnZeroFreq=F,plot=F,dpssIN=slepians_values)
-
-     #this selects only the frequency range surrounding 0.33 - the one we are concerned with - but isn't used
-     resSpec2<-dropFreqs(resSpec1,0.29,0.39)
-     
-     freq_max_3nt<-resSpec1$freq[which(abs((resSpec1$freq-(1/3)))==min(abs((resSpec1$freq-(1/3)))))]
-     
-     Fmax_3nt<-resSpec1$mtm$Ftest[which(abs((resSpec1$freq-(1/3)))==min(abs((resSpec1$freq-(1/3)))))]
-
-     spect_3nt<-resSpec1$spec[which(abs((resSpec1$freq-(1/3)))==min(abs((resSpec1$freq-(1/3)))))]
-
-     return(c(Fmax_3nt,spect_3nt))
-     
-}
-
-
-
-read_compressed_gfile <- function(annofile,annotype,fformat='gtf'){
-	f=tempfile();
-	stopifnot(file.exists(annofile))
-	catbin = ifelse(tools::file_ext(annofile)=='gz','zcat','cat')
-	system(str_interp('${catbin} ${annofile} | grep -e "\t${annotype}\t" > ${f}'));
-	out = import(f,format=fformat) 
-	file.remove(f)
-	out
-}
-
-
-get_riboprofdata<- function(exons_tr,bigwigpair){
-	
-	message( names(bigwigpair))
-	stopifnot(c('+','-') %in% names(bigwigpair))
-
-	for(i in ls()) assign(i,get(i),envir=.GlobalEnv)
-
-
-
-	profilegrange <- 
-		suppressWarnings(lapply(bigwigpair,import,which = unlist(exons_tr)))%>%
-		{for(strandi in names(.)) strand(.[[strandi]]) <- strandi;.}%>%
-		Reduce(f=c,.)%>%
-		subset(score>0)
-
-	seqlevs <-list(profilegrange,exons_tr)%>%unique%>%as.character
-
-	shared_seqinfo <- suppressWarnings(intersect(seqinfo(BigWigFile(bigwigpair[[1]])),seqinfo(exons_tr)))
-	
-	trseqinfo <- Seqinfo(seqnames=names(exons_tr),seqlengths=as.vector(sum(width(exons_tr))))
-
-	#now map our prifle data to the exons space
-	rle <- suppressWarnings(mapToTranscripts(profilegrange,exons_tr))
-	rle$score<-profilegrange$score[rle$xHits];
-	seqinfo(rle)<-trseqinfo[seqinfo(rle)@seqnames]
-	rle <- coverage(rle, weight='score')
-
-	rle %>%
-		#selecting the transcirpt we want
-		lapply(FUN=.%>%
-		#turn that into a dataframe
-			{	
-				pos = which(.!=0)
-				data_frame(pos=pos, score = as.vector(.[pos]))
-			}
-		)%>%
-		bind_rows(.id='tid')%>%
-		mutate(frame=as.factor(pos %% 3))
-}
-
+source('../src/functions.R')
 
 
 #load some utility functions
-source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/functions.R")
+
 #load excel data, parse
-stopifnot(c("ere_Peptides", "lncRNA_peptides") == readxl::excel_sheets('ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx'))
+stopifnot(c("ere_Peptides", "lncRNA_peptides") == readxl::excel_sheets('../ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx'))
 
 
 
 
 #read in the data on the repeat associated peptides
-ere_table <- readxl::read_excel('ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx',sheet=1)
+ere_table <- readxl::read_excel('../ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx',sheet=1)
 colnames(ere_table) <- c("MS_identified_peptide", "ID", "seqnames", "start", "end", "repName", 
 "strand", "class.fam", "unMerged", "FPKM RNA seq OD5PCTRL", "FPKM RNA seq OD5PDAC")
 
 
 #read in the data on the lincRNA peptides
-lncRNA_table <- readxl::read_excel('ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx',sheet=2)%>%
+lncRNA_table <- readxl::read_excel('../ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx',sheet=2)%>%
 	set_colnames(c("MS-identified peptide", "gene_id", "Gene Name", 
 "Gene Type", "FPKM RNAseq OD5PCTRL", "FPKM RNAseq DAC"))
 clipid <- . %>% str_replace('\\.\\d+$','')
 lncRNA_table$gene_id%<>%clipid
 
 
+
 #import genome as fasta file object
-genome <- ('../genomes/hg38.fa'%T>%{stopifnot(file.exists(.)) })%>%FaFile
-annofile <- 'pipeline/my_gencode.v22.annotation.gtf'%T>%{stopifnot(file.exists(.)) }
+genome <- ('../../genomes/hg38.fa'%T>%{stopifnot(file.exists(.)) })%>%FaFile
+annofile <- '../pipeline/my_gencode.v24lift37.annotation.gtf'%T>%{stopifnot(file.exists(.)) }
 
 # transcriptsother<-read_compressed_gfile('annotation/gencode.v21.annotation.gtf','transcript')
 
@@ -190,7 +59,7 @@ lincgenes <- subset(genes, gene_id %in% lncRNA_table$gene_id)
 
 
 # allbigwigs<-Sys.glob('pipeline/bigwigs/*OD5P*/*/*chr.bw')
-allbigwigs<- Sys.glob('pipeline/riboqc/data/*/_P_sites_*.bw')%>%grep(v=T,inv=T,pat='uniq')
+allbigwigs<- Sys.glob('../pipeline/riboqc/data/*/_P_sites_*.bw')%>%grep(v=T,inv=T,pat='uniq')
 
 
 bigwigpairlist <- allbigwigs%>%
@@ -227,14 +96,12 @@ ranges2plot <- c(
 ribofilenames <- names(bigwigpairlist)
 
 
-
-
-
 extract_oneof <- function(strings,ids){
 	
 	matchlist <- map(strings,~str_extract(pattern = ids,string = .))
 	
 	matchnum <- matchlist%>%map(~sum(!is.na(.)))
+	
 	stopifnot(all(matchnum < 2 ))
 	stopifnot(all(matchnum > 0))
 
@@ -242,12 +109,15 @@ extract_oneof <- function(strings,ids){
 
 	matches
 }
-extract_id <- purrr::partial(extract_oneof,sampleids)
-sampleids <- fread('pipeline/sample_parameter.csv')[[1]]
-stopifnot(all(!is.na(extract_id(ribofilenames,sampleids))))
+sampledf <- fread('../pipeline/sample_parameter.csv')
+sampleids <- sampledf %>%filter(assay=='ribo')%>%.[[1]]
+extract_id <- purrr::partial(extract_oneof,ids=sampleids)
+stopifnot(all(!is.na(extract_id(ribofilenames))))
 
-rangename='ENST00000374922'
-ribofilename=ribofilenames[[1]]
+sampleids %>%setdiff( ribofilenames)
+
+# rangename='ENST00000374922'
+# ribofilename=ribofilenames[[1]]
 
 
 # for (ribofilename in ribofilenames[1]){
@@ -281,7 +151,7 @@ ribofilename=ribofilenames[[1]]
 # 			ggtitle(plottitle)+
 # 			theme_bw()
         
-# 		rangeseq <- range%>%getSeq(x=FaFile('pipeline/my_hg38.fa'))%>%Reduce(f=c)
+# 		rangeseq <- range%>%getSeq(x=FaFile('../pipeline/my_hg38.fa'))%>%Reduce(f=c)
 # 		startpos <- rangeseq%>%str_locate('ATG')%>%.[,1]%>%{data_frame(pos=.)}%>%mutate(type='start_codon',frame = pos %%3)
 # 		stoppos <- rangeseq%>%str_locate('TAG|TAA|TGA')%>%.[,1]%>%{data_frame(pos=.)}%>%mutate(type='start_codon',frame = pos %%3)
 		
@@ -301,29 +171,13 @@ ribofilename=ribofilenames[[1]]
 
 
 #initiaal form when testing
-
-all_data <- Sys.glob('myfolder/*/*')%>%
-	setNames(.,)%>%
-	.[[1]]%>% #extract first element to test the pipe on
-	#lapply(.%>%
-	data.table::fread%>%
-	do_somethingwith_table
-
-all_data <- Sys.glob('myfolder/*/*')%>%
-	setNames(.,)%>%
-	lapply(.%>%
-		data.table::fread%>%
-		do_somethingwith_table
-		)%>%
-	bind_rows(.id='file')%>%
-	dplyr_to_parse_filename
-
-#let's look at the scores for our 
-satannfiles <- Sys.glob('./pipeline/SaTAnn/*/*Final_ORFs*')
+#let's look at the scores for our
+cell_lines<-c('OD5P','OMM','ONVC') 
+satannfiles <- Sys.glob('./../pipeline/SaTAnn/*/*Final_ORFs*')
 satannorfs <- 
 	# Sys.glob('SaTAnn/*/*Final_ORFs*')%>%
 	satannfiles%>%
-	setNames(.,extract_id(.))%>%
+	setNames(.,basename(dirname(.)))%>%
 	mclapply(load_objs)
 
 # all_linc_orfs <- satannorfs%>%map(.%>%.$ORFs_tx%>%subset(clipid(seqnames) %in% clipid(linctranscripts$transcript_id)))
@@ -348,7 +202,6 @@ linc_orfs_dt%>%nrow
 #TODO - eveyrthing in linc
 
 linc_orfs_dt_with_linctable <- linc_orfs_dt%>%inner_join(lncRNA_table,by='gene_id')
-
 linc_orfs_dt_with_linctable%<>%mutate(contains_peptide = str_detect(Protein,`MS-identified peptide`))
 
 best_linc_orfs<-linc_orfs_dt_with_linctable%>%
@@ -389,6 +242,11 @@ linctranscripts$gene_id%>%clipid%>%unique%>%is_in(best_linc_orfs$gene_id)%>%{lis
 #let's check up on if the annotaiton diff matters
 linctranscripts$gene_id%>%clipid%>%unique%>%is_in(best_linc_orfs%>%dplyr::filter(contains_peptide)%>%.$gene_id)%>%{list(sum(.),mean(.))}
 
+#fraction of our lincs that have orfs in them
+linctranscripts$gene_id%>%clipid%>%unique%>%is_in(OD5Pbest_linc_orfs$gene_id)%>%{list(sum(.),mean(.))}
+
+#let's check up on if the annotaiton diff matters
+linctranscripts$gene_id%>%clipid%>%unique%>%is_in(OD5Pbest_linc_orfs%>%dplyr::filter(contains_peptide)%>%.$gene_id)%>%{list(sum(.),mean(.))}
 
 
 #This code will insert single nucleotide variants into our 
@@ -399,8 +257,8 @@ linctranscripts$gene_id%>%clipid%>%unique%>%is_in(best_linc_orfs%>%dplyr::filter
 # mapFromTranscripts(testlocation,testexon)
 
 # mappedback <- OD5Pbest_linc_orfs%>%DT2GR(seqinf=transcript_seqinfo)%>%invertStrand%>%mapFromTranscripts(ranges_with_goodorf)
-# mappedback%>%resize(3,'start')%>%{Rsamtools::getSeq(x=FaFile('pipeline/my_hg38.fa'),.)}%>%Reduce(f='c')
-# mappedback%>%{Rsamtools::getSeq(x=FaFile('pipeline/my_hg38.fa'),.)}%>%Reduce(f='c')
+# mappedback%>%resize(3,'start')%>%{Rsamtools::getSeq(x=FaFile('../pipeline/my_hg38.fa'),.)}%>%Reduce(f='c')
+# mappedback%>%{Rsamtools::getSeq(x=FaFile('../pipeline/my_hg38.fa'),.)}%>%Reduce(f='c')
 # mappedback%>%mapToTranscripts(ranges_with_goodorf)
 
 # GRanges('ENST00000433514:1-10')%>%mapFromTranscripts(ranges_with_goodorf)
