@@ -1,113 +1,113 @@
-# library(svglite)
-# library(readr)
-# library(Biostrings)
-# library(Rsamtools)
-# library(rtracklayer)
-# library(GenomicFeatures)
-# library(stringr)
-# library(data.table)
-# library(Gviz)
-# library(rtracklayer)
-# genomestr<-'hg19'
+library(svglite)
+library(readr)
+library(Biostrings)
+library(Rsamtools)
+library(rtracklayer)
+library(GenomicFeatures)
+library(stringr)
+library(data.table)
+library(Gviz)
+library(rtracklayer)
+genomestr<-'hg19'
 
-# options(ucscChromosomeNames=F)
-# source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/src/functions.R")
+options(ucscChromosomeNames=F)
+source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/src/functions.R")
 
-# sampledf <- fread('../pipeline/sample_parameter.csv')
-# sampleids <- sampledf %>%filter(assay=='ribo')%>%.[[1]]
-# extract_id <- purrr::partial(extract_oneof,ids=sampleids)
+sampledf <- fread('../pipeline/sample_parameter.csv')
+sampleids <- sampledf %>%filter(assay=='ribo')%>%.[[1]]
+extract_id <- purrr::partial(extract_oneof,ids=sampleids)
 
-# plotfolder <- 'plots/orf_riboprofiles/' %T>% dir.create
+plotfolder <- 'plots/orf_riboprofiles/' %T>% dir.create
 
-# #get exon data
-# annofile <- '../pipeline/my_gencode.v24lift37.annotation.gtf'%T>%{stopifnot(file.exists(.)) }
-# exons<-read_compressed_gfile(annofile,'exon')
-# names(exons)<-exons$transcript_id
-# exons<-makeTxDbFromGRanges(exons)%>%exonsBy(use.names=TRUE)
+#get exon data
+annofile <- '../pipeline/my_gencode.v24lift37.annotation.gtf'%T>%{stopifnot(file.exists(.)) }
+exons<-read_compressed_gfile(annofile,'exon')
+names(exons)<-exons$transcript_id
+exons<-makeTxDbFromGRanges(exons)%>%exonsBy(use.names=TRUE)
 
-# #get bigwigpairlists
+#get bigwigpairlists
 
-# allbigwigs<- Sys.glob('../pipeline/riboqc/data/*/_P_sites_*.bw')%>%grep(v=T,inv=T,pat='uniq')
+allbigwigs<- Sys.glob('../pipeline/riboqc/data/*/_P_sites_*.bw')%>%grep(v=T,inv=T,pat='uniq')
 
-# bigwigpairlist <- allbigwigs%>%
-# 	data_frame(file=.)%>%
-# 	# mutate(base=file%>%basename%>%str_replace('pos|neg',''))%>%
-# 	mutate(base=file%>%dirname%>%basename)%>%
-# 	# mutate(strand=file%>%basename%>%str_extract('pos|neg'))%>%
-# 	mutate(strand=file%>%basename%>%str_extract('plus|minus'))%>%
-# 	mutate(strand = case_when(
-# 		strand=='plus'~'+',
-# 		strand=='minus'~'-'
-# 	)) %>% 
-# 	arrange(desc(strand))%>%
-# 	{split(.,.$base)}%>%{map(.,~split(.$file,.$strand))%>%map(rev)}
+bigwigpairlist <- allbigwigs%>%
+	data_frame(file=.)%>%
+	# mutate(base=file%>%basename%>%str_replace('pos|neg',''))%>%
+	mutate(base=file%>%dirname%>%basename)%>%
+	# mutate(strand=file%>%basename%>%str_extract('pos|neg'))%>%
+	mutate(strand=file%>%basename%>%str_extract('plus|minus'))%>%
+	mutate(strand = case_when(
+		strand=='plus'~'+',
+		strand=='minus'~'-'
+	)) %>% 
+	arrange(desc(strand))%>%
+	{split(.,.$base)}%>%{map(.,~split(.$file,.$strand))%>%map(rev)}
 
-# stopifnot(bigwigpairlist%>%names%>%n_distinct%>%`>`(3))
-# stopifnot(bigwigpairlist%>%.[[1]]%>%names%>%`==`(c('+','-')))
-# ribofilenames<-names(bigwigpairlist)
-# stopifnot(all(!is.na(extract_id(ribofilenames))))
-
-
+stopifnot(bigwigpairlist%>%names%>%n_distinct%>%`>`(3))
+stopifnot(bigwigpairlist%>%.[[1]]%>%names%>%`==`(c('+','-')))
+ribofilenames<-names(bigwigpairlist)
+stopifnot(all(!is.na(extract_id(ribofilenames))))
 
 
-# #get our table of links - from which we need the orf names, and samples, and peptide sequences
-# lncs2_table <- readxl::read_excel('../ext_data/OD5P_ctrl_case_sequence_search.xlsx')
-# lncs2_table%<>%rename('HLA-peptide','"MS-identified peptide')
-# lncs2_table$gene_id <- str_extract(lncs2_table$header,'ENSG[^|]+')
-# lncs2_table$orfname <-lncs2_table$header%>%str_split('(>|\\|)')%>%map_chr(2)
-# lncs2_table$tr <- lncs2_table$orfname%>%str_split('_')%>%map_chr(1)
 
-# #
-# orfnames <- lncs2_table$orfname
-# orfsamples <- lncs2_table$header%>%str_split('(>|\\|)')%>%map_chr(7)
-# orftranscripts <- lncs2_table$tr
 
-# #make a track of all orfs
-# allsatannfiles <- Sys.glob('./../pipeline/SaTAnn/*/*Final_ORFs*')
-# allsatannorfs <- 
-# 	allsatannfiles%>%
-# 	setNames(.,extract_id(.))%>%
-# 	mclapply(load_objs)
-# #get orfs near ours
-# all_orfs_tr_orfs <- allsatannorfs%>%map(.%>%.$ORFs_tx%>%subset((seqnames) %in% (orftranscripts)))
-# #as a data.table
-# for (i in seq_along(all_orfs_tr_orfs))all_orfs_tr_orfs[[i]]$Protein%<>%as.character
-# all_orfs_tr_orfs <- all_orfs_tr_orfs%>%map(.%>%{
-# 	issimplelist <- mcols(.)%>%vapply(is,TRUE,'atomic')
-# 	.[,issimplelist]%>%GR2DT
-# })%>%bind_rows(.id='sample')
-# #width of the transcripts
-# transcript_seqinfo <- exons[unique(orftranscripts)]%>%width%>%sum%>%{Seqinfo(seqnames=names(.),seqlength=.)}
-# #
-# orftrack<-all_orfs_tr_orfs%>%
-# 	DT2GR(seqinf=transcript_seqinfo)%>%
-# 	unique%>%
-# 	{Gviz::AnnotationTrack(
-# 		name='ORFs',.,
-# 		feature=sort(c('red','green','blue'))[(start(.)%%3)+1],red='red',green='green',blue='blue',
-# 		id='.',showFeatureId=TRUE,genome=genomestr)}
+#get our table of links - from which we need the orf names, and samples, and peptide sequences
+lncs2_table <- readxl::read_excel('../ext_data/OD5P_ctrl_case_sequence_search.xlsx')
+lncs2_table%<>%rename('HLA-peptide','"MS-identified peptide')
+lncs2_table$gene_id <- str_extract(lncs2_table$header,'ENSG[^|]+')
+lncs2_table$orfname <-lncs2_table$header%>%str_split('(>|\\|)')%>%map_chr(2)
+lncs2_table$tr <- lncs2_table$orfname%>%str_split('_')%>%map_chr(1)
 
-# displayPars(orftrack) <- list(height=2)
+#
+orfnames <- lncs2_table$orfname
+orfsamples <- lncs2_table$header%>%str_split('(>|\\|)')%>%map_chr(7)
+orftranscripts <- lncs2_table$tr
 
-# #connect orfs to their peptide info
-# peptide_loc<-all_orfs_tr_orfs%>%inner_join(
-# 	lncs2_table%>%dplyr::select(peptide=`HLA-peptide`,orfname),
-# 	by=c('ORF_id_tr'='orfname')
-# )
-# #use this to change their start and end
-# peptide_loc[c('start','end')]<-peptide_loc%$%{
-# 	map2(Protein, peptide,str_locate)}%>%
-# 	map(as.data.frame)%>%
-# 	bind_rows%>%
-# 	mutate(start=((start-1)*3) + 1,end=end*3)%>%
-# 	set_colnames(c('start','end'))
-# peptidetrack<-peptide_loc%>%
-# 	DT2GR(seqinf=transcript_seqinfo)%>%
-# 	unique%>%
-# 	{Gviz::AnnotationTrack(
-# 		name='peptide',.,
-# 		feature=sort(c('red','green','blue'))[(start(.)%%3)+1],red='red',green='green',blue='blue',
-# 		id='.',showFeatureId=TRUE,genome=genomestr)}
+#make a track of all orfs
+allsatannfiles <- Sys.glob('./../pipeline/SaTAnn/*/*Final_ORFs*')
+allsatannorfs <- 
+	allsatannfiles%>%
+	setNames(.,extract_id(.))%>%
+	mclapply(load_objs)
+#get orfs near ours
+all_orfs_tr_orfs <- allsatannorfs%>%map(.%>%.$ORFs_tx%>%subset((seqnames) %in% (orftranscripts)))
+#as a data.table
+for (i in seq_along(all_orfs_tr_orfs))all_orfs_tr_orfs[[i]]$Protein%<>%as.character
+all_orfs_tr_orfs <- all_orfs_tr_orfs%>%map(.%>%{
+	issimplelist <- mcols(.)%>%vapply(is,TRUE,'atomic')
+	.[,issimplelist]%>%GR2DT
+})%>%bind_rows(.id='sample')
+#width of the transcripts
+transcript_seqinfo <- exons[unique(orftranscripts)]%>%width%>%sum%>%{Seqinfo(seqnames=names(.),seqlength=.)}
+#
+orftrack<-all_orfs_tr_orfs%>%
+	DT2GR(seqinf=transcript_seqinfo)%>%
+	unique%>%
+	{Gviz::AnnotationTrack(
+		name='ORFs',.,
+		feature=sort(c('red','green','blue'))[(start(.)%%3)+1],red='red',green='green',blue='blue',
+		id='.',showFeatureId=TRUE,genome=genomestr)}
+
+displayPars(orftrack) <- list(height=2)
+
+#connect orfs to their peptide info
+peptide_loc<-all_orfs_tr_orfs%>%inner_join(
+	lncs2_table%>%dplyr::select(peptide=`HLA-peptide`,orfname),
+	by=c('ORF_id_tr'='orfname')
+)
+#use this to change their start and end
+peptide_loc[c('start','end')]<-peptide_loc%$%{
+	map2(Protein, peptide,str_locate)}%>%
+	map(as.data.frame)%>%
+	bind_rows%>%
+	mutate(start=((start-1)*3) + 1,end=end*3)%>%
+	set_colnames(c('start','end'))
+peptidetrack<-peptide_loc%>%
+	DT2GR(seqinf=transcript_seqinfo)%>%
+	unique%>%
+	{Gviz::AnnotationTrack(
+		name='peptide',.,
+		feature=sort(c('red','green','blue'))[(start(.)%%3)+1],red='red',green='green',blue='blue',
+		id='.',showFeatureId=TRUE,genome=genomestr)}
 
 
 

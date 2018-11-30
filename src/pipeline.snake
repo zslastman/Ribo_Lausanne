@@ -198,11 +198,9 @@ rule all:
     # expand("bigwigs/{group}/{strand}/{istrans}.done",group = SAMPLES,strand=strands,istrans=istransvals),
     # expand("mergedbigwigs/{group}/{strand}/{istrans}.done",group = GROUPS,strand=strands,istrans=istransvals),
     # expand("ribotaper/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
-    # expand('junctioncounts/{sample}/{sample}.junctioncounts.tsv',sample=ribosamples),
-    expand("SaTAnn/{sample}/.done", sample = ribosamples),
-    expand('SaTAnn/{groupname}/.done',groupname=groupnames),
-    expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples),
-    expand('riboqc/reports/{groupname}/riboqcreport.html',groupname=groupnames),
+    expand('junctioncounts/{sample}/{sample}.junctioncounts.tsv',sample=ribosamples),
+    expand("SaTAnn/{sample}/.done", sample = ribosamples+groupnames),
+    expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples+groupnames),
 
 # expand("ribotapermetaplots/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
     

@@ -56,8 +56,6 @@ introns%>%
 	write_tsv(col_names=FALSE,paste0(outputfolder,gffbase,'.tsv')) 
 
 
-####Now the junction files
-genes <- read_compressed_gfile(GTF,'gene')
 
 # juncfile <- 'ref_metadata.filt.tsv'
 juncfiles <- list.files(rec=TRUE,patt='.*.tsv$',juncfiledir,full=TRUE)
@@ -191,3 +189,11 @@ mcols(mergedjunctionintrons)[,c('ID','id_in_unique')]%>%as.data.frame%>%write_ts
 
 uniqueintrons%>%saveRDS('junctions/uniqueintrons.rds')
 
+jcfiles <- Sys.glob("junctioncounts/*/*.junctioncounts.tsv")%>%grep(v=T,inv=T,patt='L5|L7')
+jcfile <- 'junctioncounts/OD5P_05_uM_DAC_1/OD5P_05_uM_DAC_1.junctioncounts.tsv'
+
+hitcounts<-mclapply(jcfiles,function(jcfile) fread(str_interp("grep -e hit junctions/id_unique.txt | cut -f 2 | awk '{ print(\"^\"$1\"\\\\s\")}' | grep -f - ${jcfile}")))
+
+hitcounts%>%Reduce(f=partial(left_join,by='V1'))%>%dplyr::select(-V1)%>%rowSums%>%`!=`(0)%>%table
+
+hitcounts[jcfiles%>%str_detect('OD5P')]%>%Reduce(f=partial(left_join,by='V1'))%>%dplyr::select(-V1)%>%rowSums%>%`!=`(0)%>%table

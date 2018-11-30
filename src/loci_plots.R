@@ -202,7 +202,17 @@ linc_orfs_dt%>%nrow
 #TODO - eveyrthing in linc
 
 linc_orfs_dt_with_linctable <- linc_orfs_dt%>%inner_join(lncRNA_table,by='gene_id')
-linc_orfs_dt_with_linctable%<>%mutate(contains_peptide = str_detect(Protein,`MS-identified peptide`))
+linc_orfs_dt_with_linctable$Protein_longest <- linc_orfs_dt_with_linctable%>%.[T,]%>%.$compatible_ORF_id_tr_longest%>%str_split_fixed('_',3)%>%
+	as.data.frame%>%setNames(c('chr','start','end'))%>%as('GRanges')%>%
+	mapFromTranscripts(exons)%>%
+	getSeq(x=FaFile('my_hg19.fa'))%>%translate%>%as.character
+
+linc_orfs_dt_with_linctable%<>%mutate(
+	contains_peptide = (str_detect(Protein,`MS-identified peptide` )|
+					(str_detect(Protein_longest,`MS-identified peptide`))
+))
+
+#linc_orfs_dt_with_linctable$Protein_longest%>%head
 
 best_linc_orfs<-linc_orfs_dt_with_linctable%>%
 	group_by(sample,gene_id)%>%
@@ -212,6 +222,7 @@ best_linc_orfs<-linc_orfs_dt_with_linctable%>%
 
 OD5Pbest_linc_orfs<-best_linc_orfs
 OD5Pbest_linc_orfs<-best_linc_orfs%>%subset(sample%>%str_detect('OD5P'))
+OD5Pbest_linc_orfs%>%.$sample%>%table
 
 ranges_with_goodorf <- ranges2plot %>% .[
 	match(OD5Pbest_linc_orfs$transcript_id%>%unique,
@@ -237,6 +248,7 @@ transcript_seqinfo <- exons[unique(linc_orfs_dt$transcript_id)]%>%width%>%sum%>%
 # 		id=rep('foo',length(.))}
 
 #fraction of our lincs that have orfs in them
+
 linctranscripts$gene_id%>%clipid%>%unique%>%is_in(best_linc_orfs$gene_id)%>%{list(sum(.),mean(.))}
 
 #let's check up on if the annotaiton diff matters
@@ -248,6 +260,37 @@ linctranscripts$gene_id%>%clipid%>%unique%>%is_in(OD5Pbest_linc_orfs$gene_id)%>%
 #let's check up on if the annotaiton diff matters
 linctranscripts$gene_id%>%clipid%>%unique%>%is_in(OD5Pbest_linc_orfs%>%dplyr::filter(contains_peptide)%>%.$gene_id)%>%{list(sum(.),mean(.))}
 
+#extract coords of longest possible one
+OD5Pbest_linc_orfs%<>%assign_longestcompat_coords
+assign_longestcompat_coords<-function(x){
+	x$compatible_ORF_id_tr_longest%>%
+	str_split_fixed('_',3)%>%.[,2:3]%>% 
+	as_data_frame %>%
+	set_colnames(c('longstart','longend')) %>% 
+	bind_cols(x,.) 
+}
+get_protseq <- function()
+OD5Pbest_linc_orfs%>%colnames
+OD5Pbest_linc_orfs%>%mutate(istrunc= start< longstart)%>%.$istrunc%>%table
+OD5Pbest_linc_orfs%>%mutate(istrunc= start< longstart)%>%.$istrunc%>%which
+
+
+
+sttrrange <- OD5Pbest_linc_orfs%>%.[T,]%>%.$ORF_id_tr%>%str_split_fixed('_',3)%>%as.data.frame%>%setNames(c('chr','start','end'))%>%as('GRanges')
+sprots <- sttrrange%>%	mapFromTranscripts(exons)%>%
+	getSeq(x=FaFile('my_hg19.fa'))
+
+
+
+
+testid ='ENST00000611052'
+
+OD5Pbest_linc_orfs$com
+
+sprots[26]
+lprots[26]
+
+sprots %in% lprots
 
 #This code will insert single nucleotide variants into our 
 

@@ -19,7 +19,7 @@ source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/functions.R")
 #load arguments
 args <- c(
 	vcffile = '../ext_data/vcfs_october_2018/vcfs/0D5P_M11_240517/M11_mq_240517.vcf',
-	orfobjectfile = 'satann/data/test/SaTAnn_ORFs_files',
+	orfobjectfile = 'SaTAnn/OD5P_05_uM_DAC_1/SaTAnn_Final_ORFs_files',
 	genome = 'my_hg19.fa',
 	outputfile = ''
 )
@@ -76,23 +76,68 @@ stopifnot(all((vcfpullseqs==vcfrefannoseq)||(vcfpullseqs==vcfaltannoseq)))
 
 
 ##########This function produces modified DNA sequences from gr of exons, a vcf, and a genome file
+orfsgenome<-satandata[1:3000]
+injectSNPsIndels <- function(orfsgenome,vcfgr,genome,snpstringsep=','){
+	
+	rs2187121
 
-injectSNPsIndels <- function(orfsgenome,vcfgr,genome){
 	stopifnot(is(orfsgenome,'GRanges'))
 	stopifnot(is(vcfgr,'GRanges'))
-	
+	vcfgr_snps <- vcfgr[nchar(vcfgr$ALT)==1]
 	vcfgr$ALT<-DNAStringSet(vcfgr$ALT)
-	posorfs <- orfsgenome%>%subset(strand=='+')%>%split(.,names(.))
-	mutsonorfs <- mapToTranscripts(vcfgr,posorfs)
-	# posorfdnaseq <- posorfs[unique(seqnames(mutsonorfs))]%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
-	posorfdnaseq <- posorfs%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
+	orfsgenome <- orfsgenome%>%split(.,names(.))
+	allorfnames <- names(orfsgenome)
+	mutsonorfs <- mapToTranscripts(vcfgr,orfsgenome)
+	orfsmutted <- orfsgenome[mutsonorfs$transcriptsHits]
+	# posorfdnaseq <- orfsgenome[unique(seqnames(mutsonorfs))]%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
+	posorfdnaseq <- orfsmutted%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
 	mutsonorfs$ALT = vcfgr$ALT[mutsonorfs$xHits]
 	msnames <- as.character(seqnames(mutsonorfs))
 	#now modify the dna strings
 	stopifnot(all(msnames %in% names(posorfdnaseq)))
-	mutsonorfs_isindel = ! ((nchar(mutsonorfs$ALT)==1) & (width(mutsonorfs)==1))
+#	nonindelinds<-which(!mutsonorfs_isindel)
+	mutlocs <- start(mutsonorfs)
+	startaainds <- ceiling(mutlocs/3)
+	startbpinds <- ((startaainds-1)*3)+1
+	codseqs<-subseq(DNAStringSet(posorfdnaseq[msnames]),startbpinds,width=3)
+	refaas <- translate(codseqs)
+	subseq(codseqs,(((mutlocs)-1)%%3)+1,width=1) <- mutsonorfs$ALT
+	altaas <- translate(codseqs)
+	orfmodstrings <- data_frame(
+		orfname=names(orfsgenome)[mutsonorfs$transcriptsHits],
+		snpstring=paste0(refaas,startaainds,altaas))
+	#collapse
+	orfmodstrings <- orfmodstrings%>%group_by(orfname)%>%summarise(snpstring=paste0(snpstring,collapse=snpstringsep))
+
+	data_frame(orfname=allorfnames)%>%left_join(orfmodstrings)%>%replace_na(replace=list(snpstring=''))%>%head%>%do.call(paste0,.)
+
 
 	for(i in which(!mutsonorfs_isindel)){
+		mutloc<-start(mutsonorfs[i])
+		startaaind <- ceiling(mutloc/3)
+		startbpind <- ((startaaind-1)*3)+1
+		codseq <- dnaseq[startbpind:(startbpind+2)]
+		refaa <- translate(codseq)
+		codseq[(((mutloc)-1)%%3)+1] <- mutsonorfs$ALT[[i]]
+		altaa <- translate(codseq)
+		paste0(refaa,startaaind,altaa)
+
+		names(posorfdnaseq)[msnames[[i]]]
+
+		aaref <- translate()
+
+		dnaseq<-posorfdnaseq[[msnames[i]]]
+		aamut <- translate(dnaseq[startbpind:endbpind])
+
+
+		protseq
+		#codonends ceiling(1:7/3)*3
+		ceiling(start(mutsonorfs)[i]/3)*3+1
+		floor(start(mutsonorfs)[i]/3)+1
+		mutcodons <- dnaseq[codstart:codend]
+		mutinds <- start(mutsonorfs[i]):end(mutsonorfs[i])
+		
+		posorfdnaseq[[msnames[i]]][]
 		posorfdnaseq[[msnames[i]]][start(mutsonorfs[i]):end(mutsonorfs[i])]<-mutsonorfs$ALT[[i]]
 	}
 
@@ -129,15 +174,16 @@ injectSNPsIndels <- function(orfsgenome,vcfgr,genome){
 			seqs = DNAStringSet(c(posorfdnaseq,negorfdnaseq)[unique(names(orfsgenome))])
 		)
 	)
-
 }
-
 
 vcfname <-basename(vcffile)
 
 for(celllinefile in celllinefiles){
 	satandata <- load_objs(orfobjectfile)$ORFs_gen
 	snpinject <- injectSNPsIndels(satandata,vcfgr,mygenome)
+	
+	satandata%>%getSeq(x=genome)%>%
+
 	stop()
 	seqs <- snpinject$seqs
 
@@ -147,4 +193,8 @@ for(celllinefile in celllinefiles){
 	writeXStringSet(translate(seqs),protfile)
 
 }
+
+
+
+
 
