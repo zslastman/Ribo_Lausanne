@@ -58,7 +58,6 @@ take_Fvals_spect<-function(x,n_tapers,time_bw,slepians_values){
      if(length(x)<1024/2){padding<-1024}
      if(length(x)>=1024/2){padding<-"default"}
 
-     browser()
      resSpec1 <- spec.mtm(as.ts(x), k=n_tapers, nw=time_bw, nFFT = padding, centreWithSlepians = TRUE, Ftest = TRUE, maxAdaptiveIterations = 100,returnZeroFreq=F,plot=F,dpssIN=slepians_values)
           
      closestfreqind <- which(abs((resSpec1$freq-(1/3)))==min(abs((resSpec1$freq-(1/3)))))
@@ -83,55 +82,6 @@ ftestvect<-function(psit,k=24,bw=12){
 	return(c(pval))
 }
 
-
-
-#this is similiar to the above, but smooshes teh functions together (not really sure
-#why they were seperate), and returns the actual mtm object.
-#this contains the power spectrum ( .$spec ) as well as Fvalues and other stuff
-#see ?multitaper::spec.mtm
-get_mmt_spec<-function(psit,n_tapers=24,time_bw=12,slepians_values){
-	psit <- as.vector(psit)
-	if(sum(psit!=0) < 3) return(NA)
-	if(sum(psit) < 10) return(NA)
-		
-	slepians_values<-dpss(n=length(psit)%>%ifelse(.<25,50,.),k=n_tapers,nw=time_bw)
-	
-     if(length(psit)<25){
-          remain<-50-length(psit)
-          psit<-c(rep(0,as.integer(remain/2)),psit,rep(0,remain%%2+as.integer(remain/2)))
-     }
-     if(length(psit)<1024/2){padding<-1024}
-     if(length(psit)>=1024/2){padding<-"default"}
-
-     resSpec1 <- spec.mtm(as.ts(psit), k=n_tapers, nw=time_bw, nFFT = padding, centreWithSlepians = TRUE, Ftest = TRUE, maxAdaptiveIterations = 100,returnZeroFreq=F,plot=F,dpssIN=slepians_values)
-     
-     resSpec1
-     
-}
-
-txtplot(get_mmt_spec(rep(c(1000,0,0),20))$spec)
-
-txtplot(get_mmt_spec(rep(c(5,0,0),1))$spec)
-
-
-
-fft_specdense <-function(psit){
-	len <- length(psit)
-	ft <- fft(psit)
-	ft*(Conj(ft))
-}
-
-resSpec1$spec
-
-
-tvect <- rep(c(3,0,0),12)
-tvects1 <- rep(c(3,0,0),12)[-1]
-tvects2 <- rep(c(3,0,0),12)[-c(1:2)]
-normvect <- rnorm(36)
-normtvect <- tvect + normvect
-
-
-spec.mtm()
 
 
 
@@ -249,78 +199,78 @@ pval_df <-
 	spread(fp,p_spec)%>%
 	dplyr::select(ID,fp_spec=`TRUE`,tp_spec=`FALSE`)
 
-pval_df %>%write_tsv(outfile)
+pval_df %>%write_tsv(outputfile)
 
 
 
 
 
 
-# #create a granges list ocntaining the paired exons as transcripts, and the individual exons as transcripts
-# exonsbytrid <- exons%>%subset(type=='exon')%>%split(.,.$transcript_id)
-# exonslist<-c(exonsbytrid,exons%>%subset(type=='exon')%>%split(.,.$ID))
+# # #create a granges list ocntaining the paired exons as transcripts, and the individual exons as transcripts
+# # exonsbytrid <- exons%>%subset(type=='exon')%>%split(.,.$transcript_id)
+# # exonslist<-c(exonsbytrid,exons%>%subset(type=='exon')%>%split(.,.$ID))
 
-# segmentseqs<-xscat(
-# 	getSeq(clippedfpexons,x=FaFile('my_hg19.fa')),
-# 	getSeq(clippedtpexons,x=FaFile('my_hg19.fa'))
-# )
+# # segmentseqs<-xscat(
+# # 	getSeq(clippedfpexons,x=FaFile('my_hg19.fa')),
+# # 	getSeq(clippedtpexons,x=FaFile('my_hg19.fa'))
+# # )
 
-# exonslist%>%length
-# segmentseqs%>%length
+# # exonslist%>%length
+# # segmentseqs%>%length
 
-# ORFik::findORFs(segmentseqs,longestORF=TRUE)
+# # ORFik::findORFs(segmentseqs,longestORF=TRUE)
 
 
-# addedstarts<-'ATGCATGCATG'
-# addedstops<-'TAACTAACTAA'
+# # addedstarts<-'ATGCATGCATG'
+# # addedstops<-'TAACTAACTAA'
 
-# inseq <- 'TAAGGGGGG'
-# nchar(inseq)
-# nchar(addedstarts)+nchar(inseq)
+# # inseq <- 'TAAGGGGGG'
+# # nchar(inseq)
+# # nchar(addedstarts)+nchar(inseq)
 
 
-#if a reading frame starts between 1 and 11, it begins before the exon somewhere
-#9 is the 1st reading frame,1 is the second, 5 is the third
-#thus nchar(start)+nchar(seq)+3 is the first open reading frame, +4 is the 2nd, + 8 is the third
+# #if a reading frame starts between 1 and 11, it begins before the exon somewhere
+# #9 is the 1st reading frame,1 is the second, 5 is the third
+# #thus nchar(start)+nchar(seq)+3 is the first open reading frame, +4 is the 2nd, + 8 is the third
 
-#get the longest open reading frame, clip the start and stop back, use resulting range to clip the vector
+# #get the longest open reading frame, clip the start and stop back, use resulting range to clip the vector
 
-test <- ORFik::findORFs(paste0(addedstarts,addedstops))
-14-11
+# test <- ORFik::findORFs(paste0(addedstarts,addedstops))
+# 14-11
 
 
-seqlens <- nchar(segmentseqs)
-addstartlen <- nchar(addedstarts)
-longestorfs <- ORFik::findORFs(xscat(addedstarts,segmentseqs,addedstops),longest=TRUE)%>%unlist
-start(longestorfs)= pmax(start(longestorfs), addstartlen+1) - addstartlen
-end(longestorfs)= pmin(end(longestorfs), addstartlen+seqlens) - addstartlen
+# seqlens <- nchar(segmentseqs)
+# addstartlen <- nchar(addedstarts)
+# longestorfs <- ORFik::findORFs(xscat(addedstarts,segmentseqs,addedstops),longest=TRUE)%>%unlist
+# start(longestorfs)	= pmax(start(longestorfs), addstartlen+1) - addstartlen
+# end(longestorfs)	= pmin(end(longestorfs), addstartlen+seqlens) - addstartlen
 
+# # ORFik::findORFs(paste0(addedstarts,addedstops))
+# # ORFik::findORFs('ATGCATGCATGCCTAACTAACTAA')
+# # ORFik::findORFs('ATGCATGCATGCCCTAACTAACTAA')
 
+# #load our psites into the exon space, mapping over teh scores at each
+# trseqinfo <- Seqinfo(seqnames=names(exonslist),seqlengths=as.vector(sum(width(exonslist))))
+# mappedcov <- mapToTranscripts(covgr, exonslist)
+# seqinfo(mappedcov)<-trseqinfo[seqinfo(mappedcov)@seqnames]
+# mappedcov$score <- covgr$score[mappedcov$xHits]
+# #get our vectors of psite coverage, and then test those
+# spectests<-mappedcov%>%
+# 	coverage(weight='score')%>%
+# 	lapply(as.vector)%>%
+# 	map(ftestvect)
+# #format results into a data frame
+# spectestdf<-spectests%>%
+# 	simplify2array%>%t%>%as.data.frame%>%
+# 	rownames_to_column%>%
+# 	set_colnames(c('ID','F','spec','pval'))%>%
+# 	arrange(ID)
+# #write the results into a file
+# write_tsv(spectestdf,outfile)
 
 
-ORFik::findORFs(paste0(addedstarts,addedstops))
 
-ORFik::findORFs('ATGCATGCATGCCTAACTAACTAA')
-ORFik::findORFs('ATGCATGCATGCCCTAACTAACTAA')
 
-#load our psites into the exon space, mapping over teh scores at each
-trseqinfo <- Seqinfo(seqnames=names(exonslist),seqlengths=as.vector(sum(width(exonslist))))
-mappedcov <- mapToTranscripts(covgr, exonslist)
-seqinfo(mappedcov)<-trseqinfo[seqinfo(mappedcov)@seqnames]
-mappedcov$score <- covgr$score[mappedcov$xHits]
-#get our vectors of psite coverage, and then test those
-spectests<-mappedcov%>%
-	coverage(weight='score')%>%
-	lapply(as.vector)%>%
-	map(ftestvect)
-#format results into a data frame
-spectestdf<-spectests%>%
-	simplify2array%>%t%>%as.data.frame%>%
-	rownames_to_column%>%
-	set_colnames(c('ID','F','spec','pval'))%>%
-	arrange(ID)
-#write the results into a file
-write_tsv(spectestdf,outfile)
 
 
 
@@ -331,101 +281,146 @@ write_tsv(spectestdf,outfile)
 
 
 
+# # (mapToTranscripts(testwindow,exons_tr))
+# gr$score<-profilegrange$score[gr$xHits];
+# # gr%>%subset(score>30)
+# # profilegrange%>%subset(score>30)
 
+# datname = bigwigpair%>%extract_id%>%.[[1]]
 
+# scoremat <- rep(0,length(gr)*3)%>%matrix(ncol=3)
+# scoremat[matrix( c(1:length(gr),(start(gr)%%3)+1 ) ,ncol=2 ) ] <- gr$score
+# mcols(gr) = scoremat
+# rgbvect <- c('red','green','blue')%>%sort
 
+# if(length(gr)==0) {groupvect <- NULL}else{
+# 	# groupvect <- groupvect[(start(gr)%%3)+1]
+# 	groupvect <- paste0('frame ',1:3)
+# } 
 
-# (mapToTranscripts(testwindow,exons_tr))
-gr$score<-profilegrange$score[gr$xHits];
-# gr%>%subset(score>30)
-# profilegrange%>%subset(score>30)
 
-datname = bigwigpair%>%extract_id%>%.[[1]]
 
-scoremat <- rep(0,length(gr)*3)%>%matrix(ncol=3)
-scoremat[matrix( c(1:length(gr),(start(gr)%%3)+1 ) ,ncol=2 ) ] <- gr$score
-mcols(gr) = scoremat
-rgbvect <- c('red','green','blue')%>%sort
 
-if(length(gr)==0) {groupvect <- NULL}else{
-	# groupvect <- groupvect[(start(gr)%%3)+1]
-	groupvect <- paste0('frame ',1:3)
-} 
 
+# k=24
+# bw=12
 
+# sl<-dpss(n=length(psit)%>%ifelse(.<25,50,.),k=k,nw=bw)
 
+# take_Fvals_spect(nuccounts,k,bw,sl)
 
+# take_Fvals_spect(c(rep(0,3),nuccounts,rep(0,3)),k,bw,sl)
 
-k=24
-bw=12
+# take_Fvals_spect
 
-sl<-dpss(n=length(psit)%>%ifelse(.<25,50,.),k=k,nw=bw)
 
-take_Fvals_spect(nuccounts,k,bw,sl)
 
-take_Fvals_spect(c(rep(0,3),nuccounts,rep(0,3)),k,bw,sl)
+# ## Read some sample ecg data
+# ecg <- read.table('http://www.indyrad.iupui.edu/public/mmiller3/sample-ecg-1kHz.txt')
+# names(ecg) <- c('t','ecg')
 
-take_Fvals_spect
+# ecg$t <- ecg$t/1000  # convert from ms to s
 
+# par(mfrow=c(2,2))
 
+# ## Plot the ecg:
+# plot(ecg ~ t, data=ecg, type='l', main='ECG data sampled at 1 kHz', xlab='Time [s]')
 
-## Read some sample ecg data
-ecg <- read.table('http://www.indyrad.iupui.edu/public/mmiller3/sample-ecg-1kHz.txt')
-names(ecg) <- c('t','ecg')
+# ## Calculate fft(ecg):
+# ecg$fft <- fft(ecg$ecg)
 
-ecg$t <- ecg$t/1000  # convert from ms to s
+# ## Plot fft(ecg):
+# #plot(ecg$fft, type='l')
 
-par(mfrow=c(2,2))
+# ## Plot Mod(fft(ecg)):
+# plot(Mod(ecg$fft), type='l', log='y', main='FFT of ecg vs index')
 
-## Plot the ecg:
-plot(ecg ~ t, data=ecg, type='l', main='ECG data sampled at 1 kHz', xlab='Time [s]')
+# ## Find the sample period:
+# delta <- ecg$t[2] - ecg$t[1]
 
-## Calculate fft(ecg):
-ecg$fft <- fft(ecg$ecg)
+# ## Calculate the Nyquist frequency:
+# f.Nyquist <- 1 / 2 / delta
 
-## Plot fft(ecg):
-#plot(ecg$fft, type='l')
+# ## Calculate the frequencies.  (Since ecg$t is in seconds, delta
+# ## is in seconds, f.Nyquist is in Hz and ecg$freq is in Hz)
+# ## (Note: I may be off by 1 in indexing here ????)
+# ecg$freq <- f.Nyquist*c(seq(nrow(ecg)/2), -rev(seq(nrow(ecg)/2)))/(nrow(ecg)/2)
 
-## Plot Mod(fft(ecg)):
-plot(Mod(ecg$fft), type='l', log='y', main='FFT of ecg vs index')
+# ## Plot fft vs frequency
+# plot(Mod(fft) ~ freq, data=ecg, type='l', log='y', main='FFT of ECG vs frequency', xlab='Frequency [Hz]')
 
-## Find the sample period:
-delta <- ecg$t[2] - ecg$t[1]
+# ## Now let's look at some artificial data:
+# x <- seq(100000)/1000  # pretend we're sampling at 1 kHz
 
-## Calculate the Nyquist frequency:
-f.Nyquist <- 1 / 2 / delta
+# ## We'll put in two frequency components, plus a dc offset
+# f1 <- 5  # Hz
+# f2 <- 2  # Hz
+# y <- 0.1*sin(2*pi*f1*x) + sin(2*pi*f2*x) + 50
+# fft.y <- fft(y)
 
-## Calculate the frequencies.  (Since ecg$t is in seconds, delta
-## is in seconds, f.Nyquist is in Hz and ecg$freq is in Hz)
-## (Note: I may be off by 1 in indexing here ????)
-ecg$freq <- f.Nyquist*c(seq(nrow(ecg)/2), -rev(seq(nrow(ecg)/2)))/(nrow(ecg)/2)
+# delta <- x[2] - x[1]
+# f.Nyquist <- 1 / 2 / delta
+# f <- f.Nyquist*c(seq(length(x)/2), -rev(seq(length(x)/2)))/(length(x)/2)
 
-## Plot fft vs frequency
-plot(Mod(fft) ~ freq, data=ecg, type='l', log='y', main='FFT of ECG vs frequency', xlab='Frequency [Hz]')
+# par(mfrow=c(2,2))
+# plot(x,y, type='l', xlim=c(0,20))
+# plot(f, Mod(fft.y), type='l', log='y')
 
-## Now let's look at some artificial data:
-x <- seq(100000)/1000  # pretend we're sampling at 1 kHz
+# ## Now let's zoom in and mark the points were I expect to see peaks:
+# plot(f, Mod(fft.y), type='l', log='y', xlim=c(-10,10))
+# rug(c(-f1, -f2, 0, f1, f2), col='red', side=3)
 
-## We'll put in two frequency components, plus a dc offset
-f1 <- 5  # Hz
-f2 <- 2  # Hz
-y <- 0.1*sin(2*pi*f1*x) + sin(2*pi*f2*x) + 50
-fft.y <- fft(y)
+# dev.off()
 
-delta <- x[2] - x[1]
-f.Nyquist <- 1 / 2 / delta
-f <- f.Nyquist*c(seq(length(x)/2), -rev(seq(length(x)/2)))/(length(x)/2)
 
-par(mfrow=c(2,2))
-plot(x,y, type='l', xlim=c(0,20))
-plot(f, Mod(fft.y), type='l', log='y')
 
-## Now let's zoom in and mark the points were I expect to see peaks:
-plot(f, Mod(fft.y), type='l', log='y', xlim=c(-10,10))
-rug(c(-f1, -f2, 0, f1, f2), col='red', side=3)
 
-dev.off()
 
+# #this is similiar to the above, but smooshes teh functions together (not really sure
+# #why they were seperate), and returns the actual mtm object.
+# #this contains the power spectrum ( .$spec ) as well as Fvalues and other stuff
+# #see ?multitaper::spec.mtm
+# get_mmt_spec<-function(psit,n_tapers=24,time_bw=12,slepians_values){
+# 	psit <- as.vector(psit)
+# 	if(sum(psit!=0) < 3) return(NA)
+# 	if(sum(psit) < 10) return(NA)
+		
+# 	slepians_values<-dpss(n=length(psit)%>%ifelse(.<25,50,.),k=n_tapers,nw=time_bw)
+	
+#      if(length(psit)<25){
+#           remain<-50-length(psit)
+#           psit<-c(rep(0,as.integer(remain/2)),psit,rep(0,remain%%2+as.integer(remain/2)))
+#      }
+#      if(length(psit)<1024/2){padding<-1024}
+#      if(length(psit)>=1024/2){padding<-"default"}
 
+#      resSpec1 <- spec.mtm(as.ts(psit), k=n_tapers, nw=time_bw, nFFT = padding, centreWithSlepians = TRUE, Ftest = TRUE, maxAdaptiveIterations = 100,returnZeroFreq=F,plot=F,dpssIN=slepians_values)
+     
+#      resSpec1
+     
+# }
 
+# # txtplot(get_mmt_spec(rep(c(1000,0,0),20))$spec)
+
+# txtplot(get_mmt_spec(rep(c(5,0,0),1))$spec)
+
+
+
+# fft_specdense <-function(psit){
+# 	len <- length(psit)
+# 	ft <- fft(psit)
+# 	ft*(Conj(ft))
+# }
+
+# resSpec1$spec
+
+
+# tvect <- rep(c(3,0,0),12)
+# tvects1 <- rep(c(3,0,0),12)[-1]
+# tvects2 <- rep(c(3,0,0),12)[-c(1:2)]
+# normvect <- rnorm(36)
+# normtvect <- tvect + normvect
+
+
+# spec.mtm()
 

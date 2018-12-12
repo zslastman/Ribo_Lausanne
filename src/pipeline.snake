@@ -1063,9 +1063,6 @@ rule aggregate_feature_counts:
     
       """)
 
-
-
-
 rule aggregate_junctioncounts:
   input : expand("junctioncounts/{sample}/{sample}.junctioncounts.tsv", sample = SAMPLES),
   output: 'junctioncounts/all_junctioncounts.tsv'
@@ -1079,6 +1076,19 @@ rule aggregate_junctioncounts:
             done ;
           }} ;
       """)
+
+rule segment_periodicity:
+  input:
+    juncgtf = 'junctions/ref_metadata.filt_REF.C3N-02289.filt_L1.gtf',
+    pluspsites = 'riboqc/data/OD5P_05_uM_DAC_1/_P_sites_plus.bw',
+    negpsites = 'riboqc/data/OD5P_05_uM_DAC_1/_P_sites_plus.bw',
+  output:
+    'junctionspec/ref_metadata.filt_REF.C3N-02289.filt_L1.tsv'
+  run:
+    shell(r"""
+    Rscript ../src/segment_periodicity.R
+""")
+
 
 satan_annot_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
 riboqc_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'

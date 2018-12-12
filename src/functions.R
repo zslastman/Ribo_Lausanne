@@ -1,3 +1,149 @@
+# Q
+
+injectSNPsHeader <- function(orfsgenome,vcfgr,genome,snpstringsep=','){
+  stopifnot(is(orfsgenome,'GRangesList'))
+  allorfnames <- names(orfsgenome)
+  stopifnot(is(vcfgr,'GRanges'))
+  vcfgr_snps <- vcfgr[nchar(vcfgr$ALT)==1]
+  vcfgr_snps$ALT<-DNAStringSet(vcfgr_snps$ALT)
+  
+  mutsonorfs <- mapToTranscripts(vcfgr_snps,orfsgenome)
+  orfsmutted <- orfsgenome[mutsonorfs$transcriptsHits]
+  # posorfdnaseq <- orfsgenome[unique(seqnames(mutsonorfs))]%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
+  orfdnaseq <- orfsmutted%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
+  mutsonorfs$ALT = ifelse(strand(mutsonorfs)=='+',vcfgr_snps$ALT[mutsonorfs$xHits],reverseComplement(vcfgr_snps$ALT[mutsonorfs$xHits]))
+  msnames <- as.character(seqnames(mutsonorfs))
+  #now modify the dna strings
+  stopifnot(all(msnames %in% names(orfdnaseq)))
+# nonindelinds<-which(!mutsonorfs_isindel)
+  mutlocs <- start(mutsonorfs)
+  startaainds <- ceiling(mutlocs/3)
+  startbpinds <- ((startaainds-1)*3)+1
+  codseqs<-subseq(DNAStringSet(orfdnaseq[msnames]),startbpinds,width=3)
+  refaas <- translate(codseqs)
+  subseq(codseqs,(((mutlocs)-1)%%3)+1,width=1) <- mutsonorfs$ALT
+  altaas <- translate(codseqs)
+  synon= refaas==altaas
+  mean(synon)
+
+  orfmodstrings <- data_frame(
+    orfname=names(orfsgenome)[mutsonorfs$transcriptsHits],
+    snpname=names(mutsonorfs),
+    snpstring=paste0(refaas,startaainds,altaas))
+  orfmodstrings <- orfmodstrings[!synon,]
+  #collapse
+  names(mutsonorfs) %<>% paste0(.,'_',start(mutsonorfs)%%3)
+  orfmodstrings <- orfmodstrings%>%group_by(orfname)%>%summarise(snpstring=paste0(paste0(snpname,':',snpstring),collapse=snpstringsep))
+
+  modfastaheaders <- data_frame(orfname=allorfnames)%>%
+    left_join(orfmodstrings)%>%
+    replace_na(replace=list(snpstring=''))%>%
+    do.call(partial(paste,sep="|"),.)%>%
+    paste0('|')
+
+  stopifnot(identical(modfastaheaders%>%str_split_fixed('\\|',n=3)%>%.[,1],allorfnames))
+
+  modfastaheaders
+}
+
+injectSNPsIndels <- function(orfsgenome,vcfgr,genome,snpstringsep=','){
+  
+
+  stopifnot(is(orfsgenome,'GRanges'))
+  stopifnot(is(vcfgr,'GRanges'))
+  vcfgr_snps <- vcfgr[nchar(vcfgr$ALT)==1]
+  vcfgr$ALT<-DNAStringSet(vcfgr$ALT)
+  orfsgenome <- orfsgenome%>%split(.,names(.))
+  allorfnames <- names(orfsgenome)
+  mutsonorfs <- mapToTranscripts(vcfgr,orfsgenome)
+  orfsmutted <- orfsgenome[mutsonorfs$transcriptsHits]
+  # posorfdnaseq <- orfsgenome[unique(seqnames(mutsonorfs))]%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
+  posorfdnaseq <- orfsmutted%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
+  mutsonorfs$ALT = vcfgr$ALT[mutsonorfs$xHits]
+  msnames <- as.character(seqnames(mutsonorfs))
+  #now modify the dna strings
+  stopifnot(all(msnames %in% names(posorfdnaseq)))
+# nonindelinds<-which(!mutsonorfs_isindel)
+  mutlocs <- start(mutsonorfs)
+  startaainds <- ceiling(mutlocs/3)
+  startbpinds <- ((startaainds-1)*3)+1
+  codseqs<-subseq(DNAStringSet(posorfdnaseq[msnames]),startbpinds,width=3)
+  refaas <- translate(codseqs)
+  subseq(codseqs,(((mutlocs)-1)%%3)+1,width=1) <- mutsonorfs$ALT
+  altaas <- translate(codseqs)
+  orfmodstrings <- data_frame(
+    orfname=names(orfsgenome)[mutsonorfs$transcriptsHits],
+    snpstring=paste0(refaas,startaainds,altaas))
+  #collapse
+  orfmodstrings <- orfmodstrings%>%group_by(orfname)%>%summarise(snpstring=paste0(snpstring,collapse=snpstringsep))
+
+  data_frame(orfname=allorfnames)%>%left_join(orfmodstrings)%>%replace_na(replace=list(snpstring=''))%>%head%>%do.call(paste0,.)
+
+
+  for(i in which(!mutsonorfs_isindel)){
+    mutloc<-start(mutsonorfs[i])
+    startaaind <- ceiling(mutloc/3)
+    startbpind <- ((startaaind-1)*3)+1
+    codseq <- dnaseq[startbpind:(startbpind+2)]
+    refaa <- translate(codseq)
+    codseq[(((mutloc)-1)%%3)+1] <- mutsonorfs$ALT[[i]]
+    altaa <- translate(codseq)
+    paste0(refaa,startaaind,altaa)
+
+    names(posorfdnaseq)[msnames[[i]]]
+
+    aaref <- translate()
+
+    dnaseq<-posorfdnaseq[[msnames[i]]]
+    aamut <- translate(dnaseq[startbpind:endbpind])
+
+
+    protseq
+    #codonends ceiling(1:7/3)*3
+    ceiling(start(mutsonorfs)[i]/3)*3+1
+    floor(start(mutsonorfs)[i]/3)+1
+    mutcodons <- dnaseq[codstart:codend]
+    mutinds <- start(mutsonorfs[i]):end(mutsonorfs[i])
+    
+    posorfdnaseq[[msnames[i]]][]
+    posorfdnaseq[[msnames[i]]][start(mutsonorfs[i]):end(mutsonorfs[i])]<-mutsonorfs$ALT[[i]]
+  }
+
+  for(i in which(mutsonorfs_isindel)){
+    seq <- posorfdnaseq[[msnames[i]]]
+    posorfdnaseq[[msnames[i]]] <- c(
+      seq[1:(start(mutsonorfs[i])-1)],
+      mutsonorfs[i]$ALT[[1]],
+      seq[(end(mutsonorfs[i])+1):length(seq)]
+    )   
+  }
+
+  negorfs <- orfsgenome%>%subset(strand=='-')%>%split(.,names(.))
+  mutsonorfs <- mapToTranscripts(vcfgr,negorfs)
+
+  # negorfdnaseq <- negorfs[unique(seqnames(mutsonorfs))]%>%lapply(.%>%getSeq(x=genome)%>%rev%>%Reduce(f=c))
+  negorfdnaseq <- negorfs%>%lapply(.%>%getSeq(x=genome)%>%rev%>%Reduce(f=c))
+  mutsonorfs$ALT = reverseComplement(DNAStringSet(vcfgr$ALT[mutsonorfs$xHits]))
+
+  msnames <- as.character(seqnames(mutsonorfs))
+  stopifnot(all(msnames %in% names(negorfdnaseq)))
+  #now modify the dna strings
+  mutsonorfs_isindel = ! ((nchar(mutsonorfs$ALT)==1) & (width(mutsonorfs)==1))
+  for(i in which(!mutsonorfs_isindel)) negorfdnaseq[[msnames[i]]][start(mutsonorfs[i]):end(mutsonorfs[i])]<-mutsonorfs$ALT[[i]]
+  for(i in which(mutsonorfs_isindel)){
+    seq <- negorfdnaseq[[msnames[i]]]
+    negorfdnaseq[[msnames[i]]] <- c(
+      seq[1:(start(mutsonorfs[i])-1)],
+      mutsonorfs[i]$ALT[[1]],
+      seq[(end(mutsonorfs[i])+1):length(seq)]
+    )   
+  }
+  return(list(
+      seqs = DNAStringSet(c(posorfdnaseq,negorfdnaseq)[unique(names(orfsgenome))])
+    )
+  )
+}
+
 
 read_compressed_gfile <- function(annofile,annotype,fformat='gtf'){
   f=tempfile();

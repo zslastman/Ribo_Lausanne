@@ -43,8 +43,11 @@ satannorfs <-
 	setNames(.,basename(dirname(.)))%>%
 	mclapply(load_objs)
 
+#first create gtf for all the 
 
-
+for(i in seq_along(satannorfs)){
+	rtracklayer::export(satannorfs[[i]]$ORFs_gen,paste0(dirname(satannfiles[i]),'/orfs_genomic.gtf'))
+}
 
 #now filter out the weird GRanges columns, for now, and aggregate into one data table 
 all_orfs <- satannorfs%>%map(.%>%.$ORFs_tx)
@@ -159,33 +162,50 @@ satannorfs[[1]]$ORFs_tx$ORF_category_Tx_compatible%>%unique
 
 #get the nocall ranges for that group of samples
 #use find
+
+duplicated(c(1,1,2))
+
+allgorfs<-map(satannorfs,'ORFs_gen')%>%GRangesList%>%unlist(use.names = F)
+allgorfs <- allgorfs[!duplicated(paste0(names(allgorfs),as.character(allgorfs)))]
+allgorfs$ORF_id_tr <- names(allgorfs)
 groupsamples <- names(all_orfs)%>%str_subset('OD5P')
-groupsamples <- c(groupsamples%>%str_subset('^[^_]+$'),groupsamples)%>%unique
 
-grouporfs <- GRanges(c(
-	'a:8-10','a:8-10','a:7-11','a:6-12','a:3-8'
-	))
+for(cell_line_i in c('OD5P','ONVC','OMM')){
 
-grouporfs <- all_orfs[groupsamples]%>% map(~.[,NULL])%>% GRangesList %>% unlist %>% unique
-	
-ovs <- grouporfs %>% GenomicRanges::findOverlaps(type='within') %>% as.data.frame %>% filter(!queryHits==subjectHits)
+	groupsamples <- c(groupsamples%>%str_subset('^[^_]+$'),groupsamples)%>%unique
 
-grouporfs <- grouporfs[! 1:length(grouporfs) %in% ovs$queryHits]
+	grouporfs <- all_orfs[groupsamples]%>% map(~.[,NULL])%>% GRangesList %>% unlist %>% unique
+		
+	ovs <- grouporfs %>% GenomicRanges::findOverlaps(type='within') %>% as.data.frame %>% filter(!queryHits==subjectHits)
 
-mergedorfdt <- orfs_dt%>%inner_join(names(grouporfs)%>%str_split_fixed('\\.',2)%>%as.data.frame%>%set_colnames(c('sample','ORF_id_tr')))
+	grouporfs <- grouporfs[! 1:length(grouporfs) %in% ovs$queryHits]
 
-allsi<-all_orfs%>%map(~.[,NULL])%>%GRangesList%>%unlist%>%seqinfo
+	mergedorfdt <- orfs_dt%>%inner_join(names(grouporfs)%>%str_split_fixed('\\.',2)%>%as.data.frame%>%set_colnames(c('sample','ORF_id_tr')))
 
-groupname='OD5P'
-outgtf <- str_interp('groupedsatan/${groupname}.gtf')
-outfasta <- str_interp('groupedsatan/${groupname}.fasta')
+	allsi<-all_orfs%>%map(~.[,NULL])%>%GRangesList%>%unlist%>%seqinfo
 
-protseqs <- mergedorfdt%>%{AAStringSet(setNames(.$Protein,.$ORF_id_tr))}
-names(protseqs)<-paste(mergedorfdt$ORF_id_tr,mergedorfdt$gene_biotype,mergedorfdt$gene_id,mergedorfdt$ORF_category_Gen,mergedorfdt$ORF_category_Tx_compatible,sep="|")
+	outfasta <- 
 
-protseqs%>%writeXStringSet(outfasta)
-mergedorfdt %>% DT2GR(allsi)%>%export(outgtf)
+	protseqs <- mergedorfdt%>%{AAStringSet(setNames(.$Protein,.$ORF_id_tr))}
+	names(protseqs)<-paste(mergedorfdt$ORF_id_tr,mergedorfdt$gene_biotype,mergedorfdt$gene_id,mergedorfdt$ORF_category_Gen,mergedorfdt$ORF_category_Tx_compatible,sep="|")
 
-mergedorfdt %>% DT2GR(allsi)%>%export(str_interp('groupedsatan/${groupname}.gtf'))
+	protseqs%>%writeXStringSet(str_interp('groupedsatan/${cell_line_i}.fasta'))
+
+	mergedorfdt %>% DT2GR(allsi)%>%export(str_interp('groupedsatan/${cell_line_i}.gtf'))
+	#also export record of genomic locations
+	stopifnot(all(mergedorfdt$ORF_id_tr %in% allgorfs$ORF_id_tr))
+	#now export genomic coordinates
+	allgorfs%>%subset(ORF_id_tr %in% mergedorfdt$ORF_id_tr)%>%export(str_interp('groupedsatan/${cell_line_i}.genomic.gtf'))
+
+}
+
+
+# diffgorfs <- 	setdiff(mergedorfdt$ORF_id_tr, allgorfs$ORF_id_tr)%>%.[666]
+
+# satannorfs[[mergedorfdt%>%subset(ORF_id_tr==diffgorfs)%>%.$sample]]$ORFs_gen[diffgorfs]
+
+
+diffgorfs%in%allgorfs$ORF_id_tr
+
 
 

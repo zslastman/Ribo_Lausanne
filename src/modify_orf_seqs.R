@@ -14,14 +14,14 @@ slice<-dplyr::slice
 filter<-dplyr::filter
 filter<-dplyr::filter
 
-source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/functions.R")
+source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/src/functions.R")
 
 #load arguments
 args <- c(
 	vcffile = '../ext_data/vcfs_october_2018/vcfs/0D5P_M11_240517/M11_mq_240517.vcf',
-	orfobjectfile = 'SaTAnn/OD5P_05_uM_DAC_1/SaTAnn_Final_ORFs_files',
+	orfgenomifile = 'SaTAnn/OD5P_05_uM_DAC_1/SaTAnn_Final_ORFs_files',
 	genome = 'my_hg19.fa',
-	outputfile = ''
+	outputfile = 'modified_fastas/tmp'
 )
 args <- commandArgs(trailingOnly=TRUE)[1:length(args)]%>%setNames(names(args))
 for(i in names(args)) assign(i,args[i])
@@ -76,123 +76,49 @@ stopifnot(all((vcfpullseqs==vcfrefannoseq)||(vcfpullseqs==vcfaltannoseq)))
 
 
 ##########This function produces modified DNA sequences from gr of exons, a vcf, and a genome file
-orfsgenome<-satandata[1:3000]
-injectSNPsIndels <- function(orfsgenome,vcfgr,genome,snpstringsep=','){
-	
-	rs2187121
-
-	stopifnot(is(orfsgenome,'GRanges'))
-	stopifnot(is(vcfgr,'GRanges'))
-	vcfgr_snps <- vcfgr[nchar(vcfgr$ALT)==1]
-	vcfgr$ALT<-DNAStringSet(vcfgr$ALT)
-	orfsgenome <- orfsgenome%>%split(.,names(.))
-	allorfnames <- names(orfsgenome)
-	mutsonorfs <- mapToTranscripts(vcfgr,orfsgenome)
-	orfsmutted <- orfsgenome[mutsonorfs$transcriptsHits]
-	# posorfdnaseq <- orfsgenome[unique(seqnames(mutsonorfs))]%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
-	posorfdnaseq <- orfsmutted%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
-	mutsonorfs$ALT = vcfgr$ALT[mutsonorfs$xHits]
-	msnames <- as.character(seqnames(mutsonorfs))
-	#now modify the dna strings
-	stopifnot(all(msnames %in% names(posorfdnaseq)))
-#	nonindelinds<-which(!mutsonorfs_isindel)
-	mutlocs <- start(mutsonorfs)
-	startaainds <- ceiling(mutlocs/3)
-	startbpinds <- ((startaainds-1)*3)+1
-	codseqs<-subseq(DNAStringSet(posorfdnaseq[msnames]),startbpinds,width=3)
-	refaas <- translate(codseqs)
-	subseq(codseqs,(((mutlocs)-1)%%3)+1,width=1) <- mutsonorfs$ALT
-	altaas <- translate(codseqs)
-	orfmodstrings <- data_frame(
-		orfname=names(orfsgenome)[mutsonorfs$transcriptsHits],
-		snpstring=paste0(refaas,startaainds,altaas))
-	#collapse
-	orfmodstrings <- orfmodstrings%>%group_by(orfname)%>%summarise(snpstring=paste0(snpstring,collapse=snpstringsep))
-
-	data_frame(orfname=allorfnames)%>%left_join(orfmodstrings)%>%replace_na(replace=list(snpstring=''))%>%head%>%do.call(paste0,.)
 
 
-	for(i in which(!mutsonorfs_isindel)){
-		mutloc<-start(mutsonorfs[i])
-		startaaind <- ceiling(mutloc/3)
-		startbpind <- ((startaaind-1)*3)+1
-		codseq <- dnaseq[startbpind:(startbpind+2)]
-		refaa <- translate(codseq)
-		codseq[(((mutloc)-1)%%3)+1] <- mutsonorfs$ALT[[i]]
-		altaa <- translate(codseq)
-		paste0(refaa,startaaind,altaa)
+# satann_trgr<- read_compressed_gfile('groupedsatan/OD5P.gtf','sequence_feature')
+# satann_trgr%>%mcols%>%.[1,]
+# vcfname <-basename(vcffile)
 
-		names(posorfdnaseq)[msnames[[i]]]
+# satandata <- load_objs(orfobjectfile)
 
-		aaref <- translate()
-
-		dnaseq<-posorfdnaseq[[msnames[i]]]
-		aamut <- translate(dnaseq[startbpind:endbpind])
+# satandata%>%.$ORFs_gen%>%export('orfs_genomic.gtf')
 
 
-		protseq
-		#codonends ceiling(1:7/3)*3
-		ceiling(start(mutsonorfs)[i]/3)*3+1
-		floor(start(mutsonorfs)[i]/3)+1
-		mutcodons <- dnaseq[codstart:codend]
-		mutinds <- start(mutsonorfs[i]):end(mutsonorfs[i])
-		
-		posorfdnaseq[[msnames[i]]][]
-		posorfdnaseq[[msnames[i]]][start(mutsonorfs[i]):end(mutsonorfs[i])]<-mutsonorfs$ALT[[i]]
-	}
+# ENSP00000334393.3      rs75062661_0:T141A
 
-	for(i in which(mutsonorfs_isindel)){
-		seq <- posorfdnaseq[[msnames[i]]]
-		posorfdnaseq[[msnames[i]]] <- c(
-			seq[1:(start(mutsonorfs[i])-1)],
-			mutsonorfs[i]$ALT[[1]],
-			seq[(end(mutsonorfs[i])+1):length(seq)]
-		)		
-	}
+genomicorffiles <- 'groupedsatan/*.genomic.gtf'%>%Sys.glob
+fastafiles <- genomicorffiles%>%str_replace('genomic.gtf','fasta')%>%setNames(.,genomicorffiles)
 
-	negorfs <- orfsgenome%>%subset(strand=='-')%>%split(.,names(.))
-	mutsonorfs <- mapToTranscripts(vcfgr,negorfs)
 
-	# negorfdnaseq <- negorfs[unique(seqnames(mutsonorfs))]%>%lapply(.%>%getSeq(x=genome)%>%rev%>%Reduce(f=c))
-	negorfdnaseq <- negorfs%>%lapply(.%>%getSeq(x=genome)%>%rev%>%Reduce(f=c))
-	mutsonorfs$ALT = reverseComplement(DNAStringSet(vcfgr$ALT[mutsonorfs$xHits]))
+# vcfgr<-vcfgr['rs75062661']
+# satandata$ORFs_tx[]
 
-	msnames <- as.character(seqnames(mutsonorfs))
-	stopifnot(all(msnames %in% names(negorfdnaseq)))
-	#now modify the dna strings
-	mutsonorfs_isindel = ! ((nchar(mutsonorfs$ALT)==1) & (width(mutsonorfs)==1))
-	for(i in which(!mutsonorfs_isindel)) negorfdnaseq[[msnames[i]]][start(mutsonorfs[i]):end(mutsonorfs[i])]<-mutsonorfs$ALT[[i]]
-	for(i in which(mutsonorfs_isindel)){
-		seq <- negorfdnaseq[[msnames[i]]]
-		negorfdnaseq[[msnames[i]]] <- c(
-			seq[1:(start(mutsonorfs[i])-1)],
-			mutsonorfs[i]$ALT[[1]],
-			seq[(end(mutsonorfs[i])+1):length(seq)]
-		)		
-	}
-	return(list(
-			seqs = DNAStringSet(c(posorfdnaseq,negorfdnaseq)[unique(names(orfsgenome))])
-		)
-	)
-}
 
-vcfname <-basename(vcffile)
+for(genomicorffile in genomicorffiles){
 
-for(celllinefile in celllinefiles){
-	satandata <- load_objs(orfobjectfile)$ORFs_gen
-	snpinject <- injectSNPsIndels(satandata,vcfgr,mygenome)
-	
-	satandata%>%getSeq(x=genome)%>%
+	orfsgenome <- import(genomicorffile)%>%setNames(.,.$ID)
 
+	seqs<-import(fastafiles[[genomicorffile]])%>%head(1000)
+	seqorfids<-names(seqs)%>%str_extract(regex('.*?(?=\\|)'))
+
+	orfsgenome <- orfsgenome%>%split(.,names(.))%>%.[seqorfids]	
+	#get the modified fasta headers
+	modnames <- injectSNPsHeader(orfsgenome,vcfgr,genome)
 	stop()
-	seqs <- snpinject$seqs
+	names(seqs)%<>%paste0('|',str_split_fixed(modnames,'\\|',3)%>%.[,2])
 
-	dnafile <- file.path(outputfolder,paste0('cell_line','_','celllinefile.fa'))%T>%message
-	writeXStringSet(seqs,dnafile)
-	protfile <- file.path(outputfolder,paste0('cell_line','_','celllinefile.prot.fa'))%T>%message
-	writeXStringSet(translate(seqs),protfile)
+	# dnafile <- file.path(outputfolder,paste0('cell_line','_','celllinefile.fa'))%T>%message
+	# writeXStringSet(seqs,dnafile)
+	protfile <- file.path(outputfolder,paste0(basename(genomicorffile),'_',basename(vcffile),'modified.fasta'))%T>%message
+	writeXStringSet(seqs,protfile)
 
+	import(protfile)%>%names
 }
+
+
 
 
 
