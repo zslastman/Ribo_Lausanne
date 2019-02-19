@@ -11,7 +11,7 @@ library(rtracklayer)
 genomestr<-'hg19'
 
 options(ucscChromosomeNames=F)
-source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/src/functions.R")
+source("/fast_new/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/src/functions.R")
 
 sampledf <- fread('../pipeline/sample_parameter.csv')
 sampleids <- sampledf %>%filter(assay=='ribo')%>%.[[1]]

@@ -1,7 +1,6 @@
 #This script will calculate a set of regions, say all utrs, along with some data about those, and an annotation of which are positive and negate. It will then use the data as well as some caclulated statistics like length and gc content to try and construct a realistic background set for the positive sequences
 #can probably jsut generate the sequences directly actually.
 message('loading libraries')
-library(magrittr)
 library(data.table)
 suppressMessages(library(magrittr))
 suppressMessages(library(stringr))
@@ -10,9 +9,12 @@ library(rtracklayer)
 suppressMessages(library(tidyverse))
 suppressMessages(library(Rsamtools))
 suppressMessages(library(GenomicFeatures))
+suppressMessages(library(parallel))
 suppressMessages(library(GenomicAlignments))
 
 message('...done')
+
+
 
 #load arguments
 args <- c(
@@ -30,6 +32,10 @@ for(i in names(args)) assign(i,args[i])
 dir.create(outputfolder,showWarn=T)
 outputfolder <- paste0(outputfolder,'/')
 
+
+# save.image('~/debug.r')
+# stop()
+
 read_compressed_gfile <- function(annofile,annotype,fformat='gtf'){
 	f=tempfile();
 	stopifnot(file.exists(annofile))
@@ -44,7 +50,7 @@ read_compressed_gfile <- function(annofile,annotype,fformat='gtf'){
 library(rtracklayer)
 dplyr::select->select
 dplyr::filter->filter
-GFF%>%file.exists
+stopifnot(GFF%>%file.exists)
 allanno <- GenomicFeatures::makeTxDbFromGFF(GFF)
 introns<-intronsByTranscript(allanno,use=T)
 
@@ -74,10 +80,17 @@ genechrs <-
 	bind_rows%>%
 	distinct(seqnames,gene_id)
 
+library(tools)
+
+juncids<-juncfiles%>%basename%>%file_path_sans_ext()
+tsvfiles = paste0(outputfolder,juncids,'.tsv')
+tsvfiles%>%file.exists
 
 junctiongrlist<-mclapply(juncfiles,function(juncfile){
-	message(juncfile)
 	juncid <- juncfile%>%basename%>%tools::file_path_sans_ext()
+	tsvfile = paste0(outputfolder,juncid,'.tsv')
+
+	message(juncfile)
 	juncdat <- fread(juncfile)
 	if(!'output_id' %in% colnames(juncdat)) juncdat[['output_id']] <- juncdat[['ID']]
 
@@ -154,46 +167,70 @@ junctiongrlist<-mclapply(juncfiles,function(juncfile){
 	)
 })
 
-mergedjunctionexons <- junctiongrlist%>%map(1)%>%Reduce(f=c)%>%sort
+message('done processing files. Merging')
+
 mergedjunctionintrons <- junctiongrlist%>%map(2)%>%Reduce(f=c)%>%sort
-tsvfiles <- junctiongrlist%>%map(3)
 
-dir.create(showWarnings = F,rec=TRUE,outputfolder)
-export(mergedjunctionexons,paste0(outputfolder,'all','.gtf')) 
-export(mergedjunctionintrons,paste0(outputfolder,'allintrons','.gtf')) 
-
-
-
-mcols(mergedjunctionexons)[,c('gene_id','transcript_id')]%>%as.data.frame%>%write_tsv('junction_gene_transcript_map.tsv')
-
-
-# system("find junction_exons/ | grep -v 'all.gtf' | xargs cat > junction_exons/all.gtf")
-alltsvstr <- paste0(tsvfiles,collapse=' ')
-system(str_interp("cat ${alltsvstr}| sort | uniq | grep -ve start > junction_exons/all.tsv"))
-
-
-source('../functions.R')
-
-
-
-
-
-testjuncs <- import('junctions/junction_diff_hits.gtf')%>%subset(type=='exon')%>%split(.,.$transcript_id)%>%lapply(gaps)%>%lapply('[',2)%>%GRangesList%>%unlist
+mergedjunctionintrons <- tsvfiles%>%map(fread)
+mergedjunctionintrons <- mergedjunctionintrons%>%bind_rows
+mergedjunctionintrons %<>% unique
+mergedjunctionintrons %<>% set_colnames(c('seqnames','start','end')) %>% makeGRangesFromDataFrame
 
 uniqueintrons <- mergedjunctionintrons%>%unique
 uniqueintrons$id_in_unique <- seq_along(uniqueintrons)
 mergedjunctionintrons$id_in_unique <- match(mergedjunctionintrons,uniqueintrons)
 
 #save these 
-mcols(mergedjunctionintrons)[,c('ID','id_in_unique')]%>%as.data.frame%>%write_tsv('junctions/id_unique.txt')
+mcols(mergedjunctionintrons)[,c('ID','id_in_unique')]%>%as.data.frame%>%
+	write_tsv('junctions/id_unique.txt')
+stopifnot(length(uniqueintrons)>0)
+uniqueintrons%>%
+	saveRDS('junctions/uniqueintrons.rds')
 
-uniqueintrons%>%saveRDS('junctions/uniqueintrons.rds')
 
-jcfiles <- Sys.glob("junctioncounts/*/*.junctioncounts.tsv")%>%grep(v=T,inv=T,patt='L5|L7')
-jcfile <- 'junctioncounts/OD5P_05_uM_DAC_1/OD5P_05_uM_DAC_1.junctioncounts.tsv'
 
-hitcounts<-mclapply(jcfiles,function(jcfile) fread(str_interp("grep -e hit junctions/id_unique.txt | cut -f 2 | awk '{ print(\"^\"$1\"\\\\s\")}' | grep -f - ${jcfile}")))
+tsvfiles <- junctiongrlist%>%map(3)
 
-hitcounts%>%Reduce(f=partial(left_join,by='V1'))%>%dplyr::select(-V1)%>%rowSums%>%`!=`(0)%>%table
+message('Exporting')
+dir.create(showWarnings = F,rec=TRUE,outputfolder)
 
-hitcounts[jcfiles%>%str_detect('OD5P')]%>%Reduce(f=partial(left_join,by='V1'))%>%dplyr::select(-V1)%>%rowSums%>%`!=`(0)%>%table
+export(mergedjunctionintrons,paste0(outputfolder,'allintrons','.gtf')) 
+
+
+mergedjunctionintrons<- import(paste0(outputfolder,'allintrons','.gtf')) 
+
+
+mergedjunctionexons <- junctiongrlist%>%map(1)%>%Reduce(f=c)%>%sort
+export(mergedjunctionexons,paste0(outputfolder,'all','.gtf')) 
+mcols(mergedjunctionexons)[,c('gene_id','transcript_id')]%>%as.data.frame%>%write_tsv('junction_gene_transcript_map.tsv')
+
+
+
+# system("find junction_exons/ | grep -v 'all.gtf' | xargs cat > junction_exons/all.gtf")
+alltsvstr <- paste0(tsvfiles,collapse=' ')
+
+dir.create('junction_exons',showWarnings=F)
+
+message('creating the full junction file')
+system(str_interp("cat ${alltsvstr}| sort | uniq | grep -ve start > junctions/all.tsv"))
+
+
+stopifnot('junction_exons/all.tsv'%>%file.exists)
+
+source('../src/functions.R')
+
+testjuncs <- import('junctions/junction_diff_hits.gtf')%>%subset(type=='exon')%>%split(.,.$transcript_id)%>%lapply(gaps)%>%lapply('[',2)%>%GRangesList%>%unlist
+
+
+
+
+'junctions/uniqueintrons.rds'%>%file.exists
+
+# jcfiles <- Sys.glob("junctioncounts/*/*.junctioncounts.tsv")%>%grep(v=T,inv=T,patt='L5|L7')
+# jcfile <- 'junctioncounts/OD5P_05_uM_DAC_1/OD5P_05_uM_DAC_1.junctioncounts.tsv'
+
+# hitcounts<-mclapply(jcfiles,function(jcfile) fread(str_interp("grep -e hit junctions/id_unique.txt | cut -f 2 | awk '{ print(\"^\"$1\"\\\\s\")}' | grep -f - ${jcfile}")))
+
+# hitcounts%>%Reduce(f=partial(left_join,by='V1'))%>%dplyr::select(-V1)%>%rowSums%>%`!=`(0)%>%table
+
+# hitcounts[jcfiles%>%str_detect('OD5P')]%>%Reduce(f=partial(left_join,by='V1'))%>%dplyr::select(-V1)%>%rowSums%>%`!=`(0)%>%table

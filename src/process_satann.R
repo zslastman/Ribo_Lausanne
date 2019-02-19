@@ -132,7 +132,7 @@ satann_summary_table$sample
 
 mergesamples<-satann_summary_table$sample%>%grep(v=T,inv=T,patt='_')
 
-svg(h=4,w=6,'/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/fp_bias_batches.svg')
+svg(h=4,w=6,'/fast_new/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/fp_bias_batches.svg')
 satann_summary_table%>%
 	filter(!sample %in% mergesamples)%>%
 	mutate(new = sample%>%str_detect('ctrl\\d+(B|L)'))%>%

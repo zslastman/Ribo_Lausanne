@@ -1,18 +1,63 @@
-# Q
+strandis_grl <- function(grl,selstr){
+  strandchars <- c('+','-','*')
+  stopifnot(is(grl,'GRangesList'))
+  stopifnot(selstr %in% c('+','-'))
+  strtab<-table(strand(grl))
+  strtab <- strtab[,strandchars,drop=FALSE]!=0
+  #ensure our list has only one strand each
+  stopifnot(all(rowSums(strtab[,1:3,drop=F])==1))
+  #get the logical vector
+  grl_isstr <- strtab[,selstr]
+  #return logical vector
+  grl_isstr
+}
+
+get_orf_utrs <- function(orfsgenome,exons){
+  trlens <- sum(width(exons))
+  
+  orf_utrs <- 
+    names(orfsgenome)%>%
+    # paste(sep='_',names(exons)[2],'100','200')  %>%
+    unique%>%
+    str_split_fixed('_',3)%>%
+    as.data.frame%>%
+    set_colnames(c('seqnames','start','end'))%>%
+    as('GRanges')%>%
+    resize(1,'end')%>%
+    strandshift(1)%>%
+    #get them as transcript ranges
+    {end(.) <- trlens[as.character(.@seqnames)];.}%>%
+    setNames(.,str_replace_all(as.character(.),'-|:','_'))
+
+  orf_utrs_genome<-orf_utrs%>%pmapFromTranscripts(exons[seqnames(orf_utrs)])%>%.[width(.)>0]
+  names(orf_utrs_genome) <- names(orf_utrs)
+  orf_utrs_genome
+}
+
 
 injectSNPsHeader <- function(orfsgenome,vcfgr,genome,snpstringsep=','){
+  #this stops e.g. CTG getting translated to M
+  mygeneticcode<- GENETIC_CODE
+  attr(mygeneticcode,'alt_init_codons')<-c('ATG')[0]
+
   stopifnot(is(orfsgenome,'GRangesList'))
   allorfnames <- names(orfsgenome)
   stopifnot(is(vcfgr,'GRanges'))
-  vcfgr_snps <- vcfgr[nchar(vcfgr$ALT)==1]
-  vcfgr_snps$ALT<-DNAStringSet(vcfgr_snps$ALT)
+
+  stopifnot(all(nchar(vcfgr$ALT)==1 & (width(vcfgr)==1)))
+  vcfgr$ALT<-DNAStringSet(vcfgr$ALT)
   
-  mutsonorfs <- mapToTranscripts(vcfgr_snps,orfsgenome)
+  mutsonorfs <- mapToTranscripts(vcfgr,orfsgenome)
   orfsmutted <- orfsgenome[mutsonorfs$transcriptsHits]
-  # posorfdnaseq <- orfsgenome[unique(seqnames(mutsonorfs))]%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
+
+  #make sure our grlist is properly sorted and get the sequences
+  orfsmutted%<>%sort
+  orfsmutted[strandis_grl(  orfsmutted,'-')]%<>%lapply(rev)%>%GRangesList
   orfdnaseq <- orfsmutted%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
-  mutsonorfs$ALT = ifelse(strand(mutsonorfs)=='+',vcfgr_snps$ALT[mutsonorfs$xHits],reverseComplement(vcfgr_snps$ALT[mutsonorfs$xHits]))
+
+  mutsonorfs$ALT = ifelse(strand(mutsonorfs)=='+',vcfgr$ALT[mutsonorfs$xHits],reverseComplement(vcfgr$ALT[mutsonorfs$xHits]))
   msnames <- as.character(seqnames(mutsonorfs))
+  
   #now modify the dna strings
   stopifnot(all(msnames %in% names(orfdnaseq)))
 # nonindelinds<-which(!mutsonorfs_isindel)
@@ -20,16 +65,21 @@ injectSNPsHeader <- function(orfsgenome,vcfgr,genome,snpstringsep=','){
   startaainds <- ceiling(mutlocs/3)
   startbpinds <- ((startaainds-1)*3)+1
   codseqs<-subseq(DNAStringSet(orfdnaseq[msnames]),startbpinds,width=3)
-  refaas <- translate(codseqs)
+  refaas <- translate(codseqs,mygeneticcode)
+
+
   subseq(codseqs,(((mutlocs)-1)%%3)+1,width=1) <- mutsonorfs$ALT
-  altaas <- translate(codseqs)
+  altaas <- translate(codseqs,mygeneticcode)
   synon= refaas==altaas
   mean(synon)
+
+
 
   orfmodstrings <- data_frame(
     orfname=names(orfsgenome)[mutsonorfs$transcriptsHits],
     snpname=names(mutsonorfs),
     snpstring=paste0(refaas,startaainds,altaas))
+
   orfmodstrings <- orfmodstrings[!synon,]
   #collapse
   names(mutsonorfs) %<>% paste0(.,'_',start(mutsonorfs)%%3)
@@ -45,6 +95,136 @@ injectSNPsHeader <- function(orfsgenome,vcfgr,genome,snpstringsep=','){
 
   modfastaheaders
 }
+
+# # vcfgrbak<-vcfgr
+# vcfgr<-
+# vcfgr$ALT<-'G'
+
+# injectSNPsHeader(orfsgenome,orfsgenome[[1]][1]%>%resize(4)%>%resize(1,'end')%>%{.$ALT<-'G';names(.)<-'foo';.},genome)
+
+# negtestorf<-negorfsgenome[head(which(elementNROWS(negorfsgenome)==2),1)]
+
+
+getSeq_grlist <- function(grlist,x,...){
+  #make sure our grlist is properly sorted and get the sequences
+  nms <- names(grlist)
+  grlist%<>%sort
+  grlist[strandis_grl(  grlist,'-')]%<>%lapply(rev)%>%GRangesList
+  grlistdnaseq <- grlist%>%lapply(.%>%getSeq(x=genome)%>%Reduce(f=c))
+  DNAStringSet(grlistdnaseq[nms])
+}
+
+
+
+injectIndelsHeader <- function(orfsgenome,vcfgr,genome,exons,snpstringsep=','){
+ #this stops e.g. CTG getting translated to M
+  mygeneticcode<- GENETIC_CODE
+  attr(mygeneticcode,'alt_init_codons')<-c('ATG')[0]
+
+  stopifnot(is(orfsgenome,'GRangesList'))
+  allorfnames <- names(orfsgenome)
+  stopifnot(is(vcfgr,'GRanges'))
+
+  stopifnot(!any(nchar(vcfgr$ALT)==1 & (width(vcfgr)==1)))
+  vcfgr$ALT<-DNAStringSet(vcfgr$ALT)
+  
+  mutsonorfs <- mapToTranscripts(vcfgr,orfsgenome)
+  if(length(mutsonorfs)==0){
+    nullout <-
+      data_frame(orfname=allorfnames)%>%
+        mutate(snpstring='')%>%
+        do.call(partial(paste,sep="|"),.)%>%
+        paste0('|')
+    return(nullout)
+
+  }
+  orfsmutted <- orfsgenome[mutsonorfs$transcriptsHits]
+
+  orfdnaseq <- getSeq_grlist(orfsmutted)
+
+
+  mutsonorfs$ALT = ifelse(strand(mutsonorfs)=='+',vcfgr$ALT[mutsonorfs$xHits],reverseComplement(vcfgr$ALT[mutsonorfs$xHits]))
+  msnames <- as.character(seqnames(mutsonorfs))
+  
+  #now modify the dna strings
+  stopifnot(all(msnames %in% names(orfdnaseq)))
+  
+  mutlocs <- start(mutsonorfs)
+  mutends <- end(mutsonorfs)
+  
+  isstart <- mutlocs < 4
+  prevaainds <- ceiling(mutlocs/3) - 1+ isstart
+  lastaainds <- ceiling(mutends/3)
+  startbpinds <- ((prevaainds-1)*3)+1
+  lastbpinds <- ((lastaainds-1)*3)+3
+  #browser()
+
+  dnaseqs<-subseq(DNAStringSet(orfdnaseq[msnames]),startbpinds,lastbpinds)
+  refaas <- translate(dnaseqs,mygeneticcode)
+  #insert the mutation sequence
+  subseq(dnaseqs,((mutlocs%%3))+3-(3*isstart),width=width(mutsonorfs)) <- mutsonorfs$ALT
+  frameshift<- nchar(dnaseqs)%%3 !=0
+
+  if(any(frameshift)){
+    frameshiftutrs <- get_orf_utrs(orfsgenome[msnames[frameshift]],exons)
+    frameshiftutrseqs <- DNAStringSet(getSeq_grlist(frameshiftutrs,genome))
+  }else{
+    frameshiftutrseqs <- letters[0]
+  }
+  dnaseqs[frameshift] <- paste0(
+    dnaseqs[frameshift],
+    subseq(DNAStringSet(orfdnaseq[msnames][frameshift]),lastbpinds[frameshift]+1,-1),
+    frameshiftutrseqs
+  )
+
+  #translate after trimming down to mod 3
+  dnaseqs <- DNAStringSet(substr(dnaseqs,1,(nchar(dnaseqs)%>%{floor(./3)*3})))
+  altaas <- translate(dnaseqs,mygeneticcode)
+
+  #clip after first stop codon
+  aastringends <- altaas%>%str_locate('\\*')%>%.[,1]
+  aastringends[is.na(aastringends)] <- nchar(altaas)[is.na(aastringends)]
+  altaas <- substr(altaas,1,aastringends)
+
+  orfmodstrings <- data_frame(
+    orfname=names(orfsgenome)[mutsonorfs$transcriptsHits],
+    snpname=names(mutsonorfs),
+    snpstring=paste0(refaas,prevaainds,altaas))
+
+  orfmodstrings <- orfmodstrings[refaas!=altaas,]
+  
+  #collapse
+  names(mutsonorfs) %<>% paste0(.,'_',start(mutsonorfs)%%3)
+  orfmodstrings <- orfmodstrings%>%group_by(orfname)%>%summarise(snpstring=paste0(paste0(snpname,':',snpstring),collapse=snpstringsep))
+
+  modfastaheaders <- data_frame(orfname=allorfnames)%>%
+    left_join(orfmodstrings)%>%
+    replace_na(replace=list(snpstring=''))%>%
+    do.call(partial(paste,sep="|"),.)%>%
+    paste0('|')
+
+  stopifnot(identical(modfastaheaders%>%str_split_fixed('\\|',n=3)%>%.[,1],allorfnames))
+
+  modfastaheaders
+}
+
+
+# snpheaders<-injectIndelsHeader(negtestorf,
+#   c(
+#     negtestorf[[1]][1]%>%resize(12,'end')%>%resize(2,'start')%>%{.$ALT<-'C';names(.)<-'foo';.},
+#     negtestorf[[1]][2]%>%resize(8,'start')%>%resize(2,'end')%>%{.$ALT<-'AAATGATGATG';names(.)<-'foo';.},
+#     NULL  
+#   ),
+
+#   genome,exons)
+
+# indelheaders<-injectSNPsHeader(negtestorf,negtestorf[[1]][2]%>%resize(4,'start')%>%resize(1,'end')%>%{.$ALT<-'C';names(.)<-'foo';.},genome)
+
+# full_join(
+#   snpheaders%>%str_split_fixed('\\|',3)%>%.[,-3,drop=F]%>%as.data.frame,
+# indelheaders%>%str_split_fixed('\\|',3)%>%.[,-3,drop=F]%>%as.data.frame
+# )
+
 
 injectSNPsIndels <- function(orfsgenome,vcfgr,genome,snpstringsep=','){
   
@@ -362,6 +542,10 @@ read_compressed_gfile <- function(annofile,annotype,fformat='gtf'){
   out
 }
 
+strandshift<-function(gr,dist){ 
+  sign=ifelse(strand(gr)=='-',-1,1)
+  GenomicRanges::shift(gr,dist*sign)
+}
 
 get_riboprofdata<- function(exons_tr,bigwigpair){
   

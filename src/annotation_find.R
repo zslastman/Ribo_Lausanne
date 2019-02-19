@@ -8,7 +8,7 @@ library(data.table)
 library(stringr)
 
 #load some utility functions
-source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/functions.R")
+source("/fast_new/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/functions.R")
 #load excel data, parse
 stopifnot(c("ere_Peptides", "lncRNA_peptides") == readxl::excel_sheets('ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx'))
 

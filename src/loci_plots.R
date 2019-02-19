@@ -261,7 +261,6 @@ linctranscripts$gene_id%>%clipid%>%unique%>%is_in(OD5Pbest_linc_orfs$gene_id)%>%
 linctranscripts$gene_id%>%clipid%>%unique%>%is_in(OD5Pbest_linc_orfs%>%dplyr::filter(contains_peptide)%>%.$gene_id)%>%{list(sum(.),mean(.))}
 
 #extract coords of longest possible one
-OD5Pbest_linc_orfs%<>%assign_longestcompat_coords
 assign_longestcompat_coords<-function(x){
 	x$compatible_ORF_id_tr_longest%>%
 	str_split_fixed('_',3)%>%.[,2:3]%>% 
@@ -269,10 +268,12 @@ assign_longestcompat_coords<-function(x){
 	set_colnames(c('longstart','longend')) %>% 
 	bind_cols(x,.) 
 }
-get_protseq <- function()
-OD5Pbest_linc_orfs%>%colnames
-OD5Pbest_linc_orfs%>%mutate(istrunc= start< longstart)%>%.$istrunc%>%table
-OD5Pbest_linc_orfs%>%mutate(istrunc= start< longstart)%>%.$istrunc%>%which
+# get_protseq <- function()
+# OD5Pbest_linc_orfs%<>%assign_longestcompat_coords
+
+# OD5Pbest_linc_orfs%>%colnames
+# OD5Pbest_linc_orfs%>%mutate(istrunc= start< longstart)%>%.$istrunc%>%table
+# OD5Pbest_linc_orfs%>%mutate(istrunc= start< longstart)%>%.$istrunc%>%which
 
 
 
@@ -283,14 +284,14 @@ sprots <- sttrrange%>%	mapFromTranscripts(exons)%>%
 
 
 
-testid ='ENST00000611052'
+# testid ='ENST00000611052'
 
-OD5Pbest_linc_orfs$com
+# OD5Pbest_linc_orfs$com
 
-sprots[26]
-lprots[26]
+# sprots[26]
+# lprots[26]
 
-sprots %in% lprots
+# sprots %in% lprots
 
 #This code will insert single nucleotide variants into our 
 

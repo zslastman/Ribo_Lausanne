@@ -148,13 +148,13 @@ assert set(FASTQSAMPLES) == set(SAMPLES)
 
 # assert set(ASSAY_DICT.values()) in set(['ribo','total'])
 
-satan_annot_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
-riboqc_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
+satan_annot_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
+riboqc_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
 
 ribosamples=list(filter(lambda s: ASSAY_DICT[s] == 'ribo',SAMPLES))
 totalsamples=list(filter(lambda s: ASSAY_DICT[s] == 'total',SAMPLES))
-riboms_total_file='/fast/groups/cubi/projects/2017-10-10_cortexomics/gdrive/cortexomics_ms_total/325_new_2_all_log2_LFQ_n7464.txt'
-ms_spec_file='/fast/groups/cubi/projects/2017-10-10_cortexomics/gdrive/cortexomics_ms_cyt+80+Poly/proteinGroups.txt'
+riboms_total_file='/fast/work/groups/cubi/projects/2017-10-10_cortexomics/gdrive/cortexomics_ms_total/325_new_2_all_log2_LFQ_n7464.txt'
+ms_spec_file='/fast/work/groups/cubi/projects/2017-10-10_cortexomics/gdrive/cortexomics_ms_cyt+80+Poly/proteinGroups.txt'
 
 ribofastqs=list(filter(lambda fq: FASTQSAMPLEDICT[fq] in ribosamples,FASTQS))
 totalfastqs=list(filter(lambda fq: FASTQSAMPLEDICT[fq] == totalsamples,FASTQS))
@@ -168,10 +168,10 @@ samplegroups = {
 }
 
 samplegroups.update(dict(zip(SAMPLES,[[s] for s in SAMPLES] )))
-print(samplegroups)
+# print(samplegroups)
 
 
-print(SAMPLES)
+# print(SAMPLES)
 
 rule all:
   input:
@@ -191,16 +191,18 @@ rule all:
     # expand("dupradar/data/{sample}/.done", sample = SAMPLES),
     # expand("htseq/data/{sample}/.done", sample = SAMPLES),
     expand('feature_counts_readrange/data/{sample}/{generegions}/{readrange}/.done', sample=RIBO_TOTAL_DICT.keys(), generegions=GENEREGIONS+TRNAs, readrange=READRANGES),
-    expand("feature_counts/data/{sample}/.done", sample = SAMPLES),
+    expand("feature_counts/data/{sample}/feature_counts", sample = SAMPLES),
     expand("feature_counts/all_feature_counts"),
     # expand("feature_counts/data/{sample}/{generegions}/{readrange}/.done", sample = SAMPLES, generegions = generegions+TRNAs, readrange = READRANGES),
     # expand("kallisto/data/{sample}/.done", sample = SAMPLES),
     # expand("bigwigs/{group}/{strand}/{istrans}.done",group = SAMPLES,strand=strands,istrans=istransvals),
     # expand("mergedbigwigs/{group}/{strand}/{istrans}.done",group = GROUPS,strand=strands,istrans=istransvals),
     # expand("ribotaper/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
-    expand('junctioncounts/{sample}/{sample}.junctioncounts.tsv',sample=ribosamples),
-    expand("SaTAnn/{sample}/.done", sample = ribosamples+groupnames),
+    # expand('junctioncounts/{sample}/{sample}.junctioncounts.tsv',sample=ribosamples),
+    # expand("SaTAnn/{sample}/.done", sample = ribosamples+groupnames),
     expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples+groupnames),
+    expand('groupedsatan/{group}.fasta', group = groupnames),
+   # expand('groupedsatan/{group}.variantmod.fasta', group = groupnames),
 
 # expand("ribotapermetaplots/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
     
@@ -208,8 +210,8 @@ rule all:
 MINREADLENGTH=20
 MAXREADLENGTH=300
 QUALLIM=20
-CUTADAPTBIN="~/bin/cutadapt"
-REMOVE8NBIN="~/bin/remove8N_twoarg.pl"
+CUTADAPTBIN="~/work/bin/cutadapt"
+REMOVE8NBIN="~/work/bin/remove8N_twoarg.pl"
 
 
 #things this needs - cutadapt, remove8N.pl, STAR,collapse_reads.pl,seqtk
@@ -247,22 +249,20 @@ rule link_in_files:
 rule cutadapt_reads:
   input: 'preprocessed_reads/{sample}/{fastq}'
   output: 'cutadapt_reads/{sample}/{fastq}'
-  run:
-    sample = wildcards['sample']
+  conda: '../envs/cutadapt'
 
-    shell(r"""    #   set -evx
-      
-       mkdir -p cutadapt_reads/{sample}/
-       
+  shell: """    #   set -evx
+      set -e
+       mkdir -p cutadapt_reads/{wildcards.sample}/
         zcat {input} \
            | cutadapt \
              -a TGGAATTCTCGGGTGCCAAGG \
             --minimum-length {MINREADLENGTH} \
             --maximum-length {MAXREADLENGTH} \
             -q {QUALLIM} - \
-        2> cutadapt_reads/{sample}/{wildcards.fastq}.cutadaptstats.txt \
+        2> cutadapt_reads/{wildcards.sample}/{wildcards.fastq}.cutadaptstats.txt \
         | gzip  > {output}
-""")
+"""
 
 rule collapse_reads:
     input: 'cutadapt_reads/{sample}/{fastq}'
@@ -275,7 +275,7 @@ rule collapse_reads:
        mkdir -p collapse_reads/{sample}/
      
        zcat {input}  \
-         | ~/bin/collapse_reads.pl {wildcards.sample} \
+         | ~/work/bin/collapse_reads.pl {wildcards.sample} \
          2> collapse_reads/{wildcards.sample}/{wildcards.fastq}.collreadstats.txt \
          | cat > {output}
      """)
@@ -312,13 +312,15 @@ rule make_trna_rrna_indices:
   run:
     outprefix = output[0].replace('.done','')
     fafile =outprefix+'.fa'
+    
     shell(r"""
+      source activate tophat
       #get rRNAs and tRNAs, rename the tRNAs to exons for GenePRed,
       #get the gene type out and stick it front of the transcript id
       #for better names in the fasta
       cp ../contaminants/contaminants.fa {fafile}
 
-       bowtie2-build {fafile} {outprefix} --threads {threads}
+       bowtie2-build {fafile} {outprefix} -p {threads}
        
       """)
 
@@ -478,17 +480,16 @@ rule make_utrs:
       """) 
 
 rule fastqc:
-     input: 'processed_reads/{sample}/.done'
+     input: reads = lambda wc: [fq.replace('input/','processed_reads/') for fq in SAMPLEFASTQDICT[wc['sample']]]
      output: touch('fastqc/data/{sample}/.done')
+     conda: 'fastqc'
      threads: 4
-     log:'fastqc/reports/{sample}/fastqc.log'
-     run:
-      reads= [fq.replace('input/','processed_reads/') for fq in SAMPLEFASTQDICT[wildcards['sample']]]
-      shell(r'''
+     log:'fastqc/reports/{sample}/fastqc.log'      
+     shell: r'''
           OUTDIR=$(dirname {output[0]})
           mkdir -p $OUTDIR
-          wait $(for i in {reads}; do $( fastqc -o $OUTDIR $i ) & done) 
-        ''')
+          wait $(for i in {input.reads}; do $( fastqc -o $OUTDIR $i ) & done) 
+        '''
 
 rule collect_fastqc:
      input:
@@ -517,13 +518,14 @@ rule junctions:
   run:
     shell(r"""
         Rscript ../src/junctions.R \
-          input.juncfiledir \
-          input.GFF \
-          input.v19anno\
-          input.v22anno\
-          input.v24anno\
+          {input.juncfiledir} \
+          {input.GFF} \
+          {input.v19anno}\
+          {input.v22anno}\
+          {input.v24anno}\
           $(dirname {output} )
       """)
+
     
 rule star_index:
   input: alljuncfile='junctions/all.tsv',REF=REF
@@ -590,7 +592,7 @@ rule star:
           shell(r"""
             set -x
          MY_TMP_DIR=$(mktemp -d)
-         #MY_TMP_DIR=/fast/users/dharnet_m/tmp/test
+         MY_TMP_DIR=/fast/users/dharnet_m/tmp/test
         trap "set -x; rm -rf ${{MY_TMP_DIR}}" EXIT KILL TERM INT HUP
 
          mkdir -p $MY_TMP_DIR
@@ -598,7 +600,6 @@ rule star:
         mkdir -p $MY_TMP_DIR/tophat2
 
         #--outSAMmultNmax 20 --winAnchorMultimapNmax 50 --outFilterMultimapNmax 20 \
-
 
         STAR \
               --genomeDir {input.STARINDEX} \
@@ -622,8 +623,6 @@ rule star:
               --outReadsUnmapped Fastx \
               --readFilesIn {fastqops}
           
-
-            source activate tophat
 
           iftophat=
           if [ {remap} -eq 1 ] && [ ${{MY_TMP_DIR}}/star/Unmapped.out.mate* ]; then
@@ -677,7 +676,6 @@ rule junctioncounts:
   input: 
     uniquejuncrds = 'junctions/uniqueintrons.rds',
     star = 'star/data/{sample}/.done',
-  conda: 'riboqc'
   output:
     'junctioncounts/{sample}/{sample}.junctioncounts.tsv'
   run:
@@ -836,9 +834,10 @@ refflat = 'qc/'+ANNOBASE+'.refflat'
 rule make_picard_files:
   input: GTF,'star/data/'+SAMPLES[0]+'/.done'
   output: intervals=rrna_intervals,refflat=refflat
+  conda: '../envs/picard'
   shell:r"""
          samtools view -H star/data/{SAMPLES[0]}/{SAMPLES[0]}.bam > {output.intervals}
-
+        
          grep -Pe 'gene_type..rRNA.' {input[0]} \
          | awk '$3 =="transcript"' \
          | cut -f 1,4,5,7,9 \
@@ -850,6 +849,7 @@ rule make_picard_files:
 
   """
 
+
 rule qc:
      input:
           fastqc='fastqc/data/{sample}/.done',
@@ -858,11 +858,13 @@ rule qc:
           rrna_intervals = rrna_intervals,
      output:
           done=touch('qc/data/{sample}/.done'),
-     run:
-        singleendflag = ' -singeEnd ' if LIBRARY_DICT[wildcards['sample']] == 'PAIRED' else ''   
-        bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
-        shell(
-          r"""
+     conda: '../envs/picard'
+     resources:
+     params:
+        singleendflag = lambda wc: ' -singeEnd ' if LIBRARY_DICT[wc['sample']] == 'PAIRED' else '',
+        bamfile = lambda wc:'star/data/'+wc['sample']+'/'+wc['sample']+'.bam' 
+    
+     shell: """
           set -e
           set -xv
           
@@ -875,28 +877,28 @@ rule qc:
          -o ${{OUTDIR}}/read_alignment_report.tsv \
          &> qc/reports/{wildcards.sample}/{wildcards.sample}_qc.log 
 
-         picard CollectRnaSeqMetrics \
-          I={bamfile} \
+         picard CollectRnaSeqMetrics -Xms4G \
+          I={params.bamfile} \
           O=${{OUTDIR}}/{wildcards.sample}_picard_qc.txt \
           REF_FLAT={refflat} \
           STRAND=FIRST_READ_TRANSCRIPTION_STRAND \
           RIBOSOMAL_INTERVALS={rrna_intervals}
         
         picard CollectAlignmentSummaryMetrics \
-          INPUT={bamfile} \
+          INPUT={params.bamfile} \
           OUTPUT=${{OUTDIR}}/{wildcards.sample}.picard.alignmentmetrics.txt \
           R={REF}
 
       {SCRIPTDIR}/read_duplication.sh \
-        -i {bamfile} \
+        -i {params.bamfile} \
         -o ${{OUTDIR}}/duplication/ \
         &> qc/reports/{wildcards.sample}/{wildcards.sample}_qc.log 
 
-          """)
+          """
      
 
 
-multiqcscript = '~/Applications/MultiQC/scripts/multiqc'
+multiqcscript = '~/work/Applications/MultiQC/scripts/multiqc'
 
 rule multiqc:
   input:
@@ -992,14 +994,13 @@ rule feature_counts_readrange:
           shell(r"""
           set -ex
           mkdir -p feature_counts_readrange/data/{sample}/{generegions}/{readrange}/
-
+          mkdir -p feature_counts/reports/{wildcards.sample}/
           featureCounts \
             -T {threads} \
             -t {featuretype} -g {groupcol} \
             -a {GTF} \
-            -s {protocol} {library} \
+            -s {protocol} {library} {countmultimappers} \
             -o feature_counts_readrange/data/{sample}/{generegions}/{readrange}/feature_counts \
-            {countmultimappers} \
             {rangebam} \
              &> feature_counts/reports/{wildcards.sample}/{wildcards.sample}.feature_counts.log
 
@@ -1020,7 +1021,7 @@ rule feature_counts:
           get_readrange,
           'star/data/{sample}/.done',GTF,CDSGTF,'tputrs.gtf','fputrs.gtf',
      output:
-          done = 'feature_counts/data/{sample,[^/]+}/feature_counts'
+          'feature_counts/data/{sample,[^/]+}/feature_counts'
      threads: 2
      run:       
         bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
@@ -1079,9 +1080,9 @@ rule aggregate_junctioncounts:
 
 rule segment_periodicity:
   input:
-    juncgtf = 'junctions/ref_metadata.filt_REF.C3N-02289.filt_L1.gtf',
-    pluspsites = 'riboqc/data/OD5P_05_uM_DAC_1/_P_sites_plus.bw',
-    negpsites = 'riboqc/data/OD5P_05_uM_DAC_1/_P_sites_plus.bw',
+    juncgtf = 'junctions/{junction}.gtf',
+    pluspsites = 'riboqc/data/{sample}/_P_sites_plus.bw',
+    negpsites = 'riboqc/data/{sample}/_P_sites_plus.bw',
   output:
     'junctionspec/ref_metadata.filt_REF.C3N-02289.filt_L1.tsv'
   run:
@@ -1090,8 +1091,8 @@ rule segment_periodicity:
 """)
 
 
-satan_annot_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
-riboqc_script =  '/fast/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
+satan_annot_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
+riboqc_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
 
 rule make_riboqc_anno:
   input : GTF
@@ -1109,12 +1110,11 @@ rule run_riboqc:
     bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
     shell(r""" 
             mkdir -p riboqc/data/{wildcards.sample}/
-            source activate riboqc
             Rscript {riboqc_script} {REF} riboqc/{ANNOBASE}.annoout {bamfile} riboqc/data/{wildcards.sample}/
 
   """)
 
-SaTAnn_script = '/fast/groups/ag_ohler/dharnet_m/satann_working/Satan_working_hg38_genc25_May8.R'
+SaTAnn_script = '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Satan_working_hg38_genc25_May8.R'
 
 rule make_chrnamefile:
  input: GTF
@@ -1134,7 +1134,6 @@ rule make_chrnamefile:
 #       exit
 #     fi
 
-#     source activate riboqc
   
 #       Rscript {SaTAnn_script} \
 #         {REF} \
@@ -1157,7 +1156,6 @@ rule run_satann_group:
     shell(r"""
     mkdir -p $( dirname {output} )
 
-    source activate riboqc
   
       Rscript {SaTAnn_script} \
         {REF} \
@@ -1169,7 +1167,7 @@ rule run_satann_group:
       """)
 
 
-ribqc_report='/fast/groups/ag_ohler/dharnet_m/satann_working/riboseqc.Rmd'
+ribqc_report='/fast/work/groups/ag_ohler/dharnet_m/satann_working/riboseqc.Rmd'
 rule knit_riboqc:
   input: 
     riboqcoutput=lambda wc:
@@ -1185,10 +1183,28 @@ rule knit_riboqc:
     figpath = os.path.abspath(output[0]).replace('.html','')+'_fig'
     outpath = os.path.abspath(output[0])
     shell(r"""
-    source activate riboqc
     cd $(dirname {output})
     R -e 'rmarkdown::render("{input.ribqc_report}",params = list(input_list = "{indata}",input_list_names = "{sinputs}", output_fig_path = "{figpath}"),output_file = "{outpath}")'
 """)
+
+
+VCF_DICT = {'ONVC' : ['../ext_data/vcfs_october_2018/vcfs/0NVC_M07_240517','../ext_data/vcfs_october_2018/vcfs/0NVC_M07_240517/M07_mq_240517.vcf'],
+  'OD5P' : ['../ext_data/vcfs_october_2018/vcfs/0D5P_M11_240517/M11_tumor_240517.fasta','../ext_data/vcfs_october_2018/vcfs/0D5P_M11_240517/M11_mq_240517.vcf'],
+  'OMM' : ['../ext_data/vcfs_october_2018/vcfs/0MM745_M02_240517/M02_mq_240517.vcf']
+}
+
+modfastascript='../src/modify_orf_seqs.R'
+
+rule modify_satannfasta:
+  input:
+    'groupedsatan/{group}.genomic.gtf',REF
+  output:
+    'groupedsatan/{group}.variantmod.fasta'
+  run:
+    vcfs = ','.join(VCF_DICT[wildcards['group']])
+    shell(r"""
+      Rscript {modfastascript} {input} {vcfs} {output}
+       """)
 
 
 rule make_id_table:
@@ -1199,7 +1215,7 @@ rule make_id_table:
 DISPDIFF = 0
 rule run_ribodiff:
   input: 'feature_counts/all_feature_counts'
-  conda: '/fast/users/harnettd_c/miniconda3/envs/ribodiff/'
+  conda: 'ribodiff'
   output: touch('ribodiff/.done')
   shell: r"""Rscript ../exploration/pipeline/run_ribodiff.R {input} {DISPDIFF} $(dirname {output})"""
 

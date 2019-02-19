@@ -12,41 +12,53 @@ library(purrr)
 filter<-dplyr::filter
 slice<-dplyr::slice
 filter<-dplyr::filter
-filter<-dplyr::filter
 
-source("/fast/groups/ag_ohler/dharnet_m/Ribo_Lausanne/src/functions.R")
+source("/fast_new/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/src/functions.R")
 
 #load arguments
 args <- c(
-	vcffile = '../ext_data/vcfs_october_2018/vcfs/0D5P_M11_240517/M11_mq_240517.vcf',
-	orfgenomifile = 'SaTAnn/OD5P_05_uM_DAC_1/SaTAnn_Final_ORFs_files',
+	genomicorffile = 'groupedsatan/OD5P.genomic.gtf',
 	genome = 'my_hg19.fa',
+	vcffiles = '',
 	outputfile = 'modified_fastas/tmp'
 )
 args <- commandArgs(trailingOnly=TRUE)[1:length(args)]%>%setNames(names(args))
 for(i in names(args)) assign(i,args[i])
 
+# save.image()
+# stop(getwd())
+
 outputfolder<-dirname(outputfile)
 outputfolder <- paste0(outputfolder,'/')
 outputfolder%>%dir.create(showWarn=F,rec=TRUE)
 
-genome%T>%{stopifnot(file.exists(.))}
 genome = Rsamtools::FaFile(genome)
+
+fastafile <- genomicorffile%>%str_replace('genomic.gtf','fasta')
+
 
 #now we need to apply this function to each of the ORFs found in relevant cell lines
 
 #############Get our vcf data
+vcffiles<-str_split(vcffiles,',')%>%unlist
 vcfgr<-
-	vcffile%>%
+	vcffiles%>%
+	lapply(.%>%
 	fread%>%
 	{colnames(.)%<>%str_replace('#','');colnames(.)[1:2]<-c('seqnames','start');.}%>%
-	mutate(width=nchar(ALT),seqnames=paste0('chr',seqnames))%>%
+	mutate(width=nchar(ALT),seqnames=paste0('chr',seqnames))
+	)%>%
+	bind_rows%>%
+	distinct(seqnames,start,width,ALT,ID,.keep_all=TRUE)%>%
 	DT2GR(seqinf=genome%>%seqinfo)
 
+vcfgr %<>% setNames(.,.$ID)
+
+names(vcfgr) <- names(vcfgr)%>%data_frame(a=.)%>%group_by(a)%>%transmute(b=paste0(a,'_',seq_along(a)))%>%.$b
 # vcfgrs %<>% map(. %>% .[.$INFO=='SNP'])
 # vcfgrs %<>% map(. %>% .[nchar(.$REF)==1])
 # vcfgrs %<>% map(. %>% .[nchar(.$ALT)==1])
-vcfgr %<>% setNames(.,.$ID)
+
 
 vcfpullseqs <- vcfgr%>%getSeq(x=genome)%>%as.character
 
@@ -89,38 +101,56 @@ stopifnot(all((vcfpullseqs==vcfrefannoseq)||(vcfpullseqs==vcfaltannoseq)))
 
 # ENSP00000334393.3      rs75062661_0:T141A
 
-genomicorffiles <- 'groupedsatan/*.genomic.gtf'%>%Sys.glob
-fastafiles <- genomicorffiles%>%str_replace('genomic.gtf','fasta')%>%setNames(.,genomicorffiles)
-
+# genomicorffiles <- 'groupedsatan/*.genomic.gtf'%>%Sys.glob
+# fastafile <- genomicorffiles%>%str_replace('genomic.gtf','fasta')%>%setNames(.,genomicorffiles)
+# stopifnot(file.exi)
 
 # vcfgr<-vcfgr['rs75062661']
 # satandata$ORFs_tx[]
 
+vcfgr$indel <- !(width(vcfgr)==1 & (nchar(vcfgr$ALT)==1) )
 
-for(genomicorffile in genomicorffiles){
+# for(genomicorffile in genomicorffiles){
+orfsgenome <- rtracklayer::import(genomicorffile)%>%setNames(.,.$ID)
 
-	orfsgenome <- import(genomicorffile)%>%setNames(.,.$ID)
+#read in our protein sequences as AAStringset objects
+seqs<-	Biostrings::readAAStringSet(fastafile)
 
-	seqs<-import(fastafiles[[genomicorffile]])%>%head(1000)
-	seqorfids<-names(seqs)%>%str_extract(regex('.*?(?=\\|)'))
+#get the names of these sequences
+seqorfids<-names(seqs)%>%str_extract(regex('.*?(?=\\|)'))
 
-	orfsgenome <- orfsgenome%>%split(.,names(.))%>%.[seqorfids]	
-	#get the modified fasta headers
-	modnames <- injectSNPsHeader(orfsgenome,vcfgr,genome)
-	stop()
-	names(seqs)%<>%paste0('|',str_split_fixed(modnames,'\\|',3)%>%.[,2])
+#orfgrs in same order as our sequences
+stopifnot(setequal(seqorfids,names(orfsgenome)))
+orfsgenome <- orfsgenome%>%split(.,names(.))%>%.[seqorfids]	
 
-	# dnafile <- file.path(outputfolder,paste0('cell_line','_','celllinefile.fa'))%T>%message
-	# writeXStringSet(seqs,dnafile)
-	protfile <- file.path(outputfolder,paste0(basename(genomicorffile),'_',basename(vcffile),'modified.fasta'))%T>%message
-	writeXStringSet(seqs,protfile)
+#get the modified fasta headers
+message('getting snp headers')
+snpheaders<-injectSNPsHeader(orfsgenome,vcfgr%>%subset(!indel),genome)
+#getting indel headers
+message('getting indel headers')
+indelheaders<-injectIndelsHeader(orfsgenome,vcfgr%>%subset(indel),genome,exons)
 
-	import(protfile)%>%names
-}
+#now merge these headers
+modnames <- full_join(
+  snpheaders%>%str_split_fixed('\\|',3)%>%.[,-3,drop=F]%>%as.data.frame,
+  indelheaders%>%str_split_fixed('\\|',3)%>%.[,-3,drop=F]%>%as.data.frame,
+  by='V1'
+)%>%
+{.[match(seqorfids,.$V1),]}%>%
+{paste0(.$V1,'|',.$V2.x,',',.$V2.y)}%>%str_replace('\\|,$','|')
 
 
+#and name the sequence object
+names(seqs) %<>%paste0('|',str_split_fixed(modnames,'\\|',3)%>%.[,2])
+names(seqs) %<>%str_replace(',$','')
+#finally, export our new protein fasta with it's modified
+message('exporting')
 
+vcfnames <- vcffiles%>%map(basename)%>%map(tools::file_path_sans_ext)%>%paste0(collapse='_')
 
+# protfile <- file.path(outputfolder,paste0(basename(genomicorffile),'_',vcfnames,'modified.fasta'))%T>%message
+protfile <- outputfile%T>%message
 
-
-
+writeXStringSet(seqs,protfile)
+# import(protfile)%>%names
+# }

@@ -132,7 +132,7 @@ orftrack<-linc_orfs_dt_with_linctable%>%DT2GR(seqinf=transcript_seqinfo)%>%
 displayPars(orftrack) <- list(height=2)
 
 
-for (rangename in names(ranges_with_goodorf)){
+for (rangename in names(ranges_with_goodorf)[1]){
 # for (rangename in 'ENST00000520314'){
 # for (rangename in ranges_with_goodorf%>%names){
 	range = ranges_with_goodorf[[rangename]]
@@ -143,7 +143,8 @@ for (rangename in names(ranges_with_goodorf)){
 
 	plottitle <- str_interp("Riboseq Read Profile for:\n${rangename} = ${range}\n")		
 
-	trexons <- 
+	trexons <- GRanges(rangename,IRanges(c(1,cumsum(width(range))[-length(range)]+1),cumsum(width(range))))
+	
 	exontrack<-
 		trexons%>%
 		{AnnotationTrack(name='exons',col='black',fill='yellow',strand='*',genome=genome,id=paste0('exon_',seq_along(.)),showFeatureId=TRUE,
@@ -156,13 +157,14 @@ for (rangename in names(ranges_with_goodorf)){
 
 	orfs <- linc_orfs_dt_with_linctable%>%subset(seqnames==rangename)
 	
-	
+	plotstart <- orfs$start%>%min
 
 	#select which tracks to show
 	whichwigs <- bigwigpairlist%>%names%>%
 		extract_oneof(cellnames)%>%
 		is_in(extract_oneof(orfs$sample,cellnames))
 
+	plotgenomewindow <- GRanges(rangename,IRanges(plotstart,plotend))%>%split(.,seqnames(.))
 	#ribotrack is 
 	ribotracks <- bigwigpairlist[whichwigs]%>%
 		# .[10:11]%>%
