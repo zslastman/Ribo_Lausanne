@@ -32,6 +32,7 @@ lncRNA_table$gene_id%<>%clipid
 
 
 
+
 #import genome as fasta file object
 genome <- ('../../genomes/hg38.fa'%T>%{stopifnot(file.exists(.)) })%>%FaFile
 annofile <- '../pipeline/my_gencode.v24lift37.annotation.gtf'%T>%{stopifnot(file.exists(.)) }
@@ -53,8 +54,6 @@ exons<-makeTxDbFromGRanges(exons)%>%exonsBy(use.names=TRUE)
 #now get the relevant genes for our lincRNAs
 stopifnot(all(lncRNA_table$gene_id %in% genes$gene_id))
 lincgenes <- subset(genes, gene_id %in% lncRNA_table$gene_id)
-
-
 
 
 
@@ -86,6 +85,9 @@ stopifnot(bigwigpairlist%>%.[[1]]%>%names%>%`==`(c('+','-')))
 stopmut_transcripts <- NULL
 
 linctranscripts <- transcripts %>% subset(gene_id %in% lincgenes$gene_id)
+addtr<-'ENST00000398963'
+linctranscripts <- c(linctranscripts ,transcripts%>%subset(transcript_id== addtr))
+stopifnot(addtr %in% linctranscripts$transcript_id)
 
 ranges2plot <- c(
 	ere_gr%>%setNames(.,.$ID)%>%.[,NULL]%>%split(.,names(.)),
@@ -183,6 +185,27 @@ satannorfs <-
 # all_linc_orfs <- satannorfs%>%map(.%>%.$ORFs_tx%>%subset(clipid(seqnames) %in% clipid(linctranscripts$transcript_id)))
 all_linc_orfs <- satannorfs%>%map(.%>%.$ORFs_tx%>%subset((seqnames) %in% (linctranscripts$transcript_id)))
 
+
+matchPattern(c('DQRHLGL','DQRHLGL'),satannorfs[[1]]$ORFs_tx$Protein)
+
+map(lncRNA_table[[1]],~ vmatchPattern(.,satannorfs[[4]]$ORFs_tx$Protein)%>%unlist)
+
+
+
+testaas <- satannorfs%>%map(.%>%.$ORFs_tx%>%subset((ORF_id_tr) %in% 'ENST00000520314_6137_6232')%>%{setNames(.$Protein,.$ORF_id_tr)})%>%Reduce(f=c)%>%unique
+
+allprotseqs <- satannorfs%>%
+	.[names(.)%>%str_detect('OD5P')]%>%
+	map(.%>%.$ORFs_tx%>%{setNames(.$Protein,.$ORF_id_tr)})%>%Reduce(f=c)%>%unique
+
+
+
+vmatchPattern('SYLRRHLDF',allprotseqs)
+
+testaas <- satannorfs%>%map(.%>%.$ORFs_tx%>%subset((ORF_id_tr) %in% 'ENST00000398963_3863_3958')%>%.$Protein)%>%Reduce(f=c)%>%unique
+vmatchPattern('SYLRRHLDF',testaas)
+
+
 #all_linc_orfs
 
 #TODO_ what are these Granges columsn???
@@ -200,6 +223,7 @@ linc_orfs_dt %<>% dplyr::filter(pval<0.05)%>%ungroup
 linc_orfs_dt%>%nrow
 
 #TODO - eveyrthing in linc
+addtr %in% linc_orfs_dt$transcript_id
 
 linc_orfs_dt_with_linctable <- linc_orfs_dt%>%inner_join(lncRNA_table,by='gene_id')
 linc_orfs_dt_with_linctable$Protein_longest <- linc_orfs_dt_with_linctable%>%.[T,]%>%.$compatible_ORF_id_tr_longest%>%str_split_fixed('_',3)%>%
@@ -218,7 +242,7 @@ best_linc_orfs<-linc_orfs_dt_with_linctable%>%
 	group_by(sample,gene_id)%>%
 	arrange(desc(contains_peptide),pval)%>%
 	dplyr::slice(1)
-
+addtr %in% linc_orfs_dt_with_linctable$transcript_id
 
 OD5Pbest_linc_orfs<-best_linc_orfs
 OD5Pbest_linc_orfs<-best_linc_orfs%>%subset(sample%>%str_detect('OD5P'))
@@ -228,6 +252,10 @@ ranges_with_goodorf <- ranges2plot %>% .[
 	match(OD5Pbest_linc_orfs$transcript_id%>%unique,
 		ranges2plot%>%names)
 ]
+
+addtr %in% OD5Pbest_linc_orfs$transcript_id
+ranges2plot[addtr]
+ranges_with_goodorf[addtr]
 
 
 # orfs2plot <- best_linc_orfs[match(names(ranges_with_goodorf),best_linc_orfs$transcript_id),]
@@ -283,6 +311,9 @@ sprots <- sttrrange%>%	mapFromTranscripts(exons)%>%
 
 
 
+
+newtr <- 'ENST00000398963_3863_3958'
+orfs_dt$ORF_id_tr
 
 # testid ='ENST00000611052'
 

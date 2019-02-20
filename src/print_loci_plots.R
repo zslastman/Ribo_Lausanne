@@ -92,6 +92,7 @@ cellnames%<>%grep(v=TRUE,inv=TRUE,patt='OMM475')
 
 genome='mine'
 genomefile='pipeline/my_hg38.fa'
+
 make_startstoptrack<-function(range,fafile='pipeline/my_hg38.fa'){
 	rangeseq <- range%>%getSeq(x=FaFile(fafile))%>%Reduce(f=c)
 
@@ -119,9 +120,25 @@ make_startstoptrack<-function(range,fafile='pipeline/my_hg38.fa'){
 
 }
 
-transcript_seqinfo <- exons[unique(linc_orfs_dt_with_linctable$transcript_id)]%>%width%>%sum%>%{Seqinfo(seqnames=names(.),seqlength=.)}
-orftrack<-linc_orfs_dt_with_linctable%>%DT2GR(seqinf=transcript_seqinfo)%>%
-	# .[,'contains_peptide']%>%
+
+
+# all_linc_orfs <- satannorfs%>%map(.%>%.$ORFs_tx%>%subset(clipid(seqnames) %in% clipid(linctranscripts$transcript_id)))
+all_linc_orfs <- satannorfs%>%map(.%>%.$ORFs_tx%>%subset((seqnames) %in% (linctranscripts$transcript_id)))
+
+
+
+vmatchPattern('SYLRRHLDF',allprotseqs)
+
+
+
+
+#seqinfo object for orftrack
+transcript_seqinfo <- exons[unique(linc_orfs_dt_with_linctable$transcript_id)]%>%
+	width%>%sum%>%{Seqinfo(seqnames=names(.),seqlength=.)}
+
+#track with the orf's in transcript space
+orftrack<- linc_orfs_dt_with_linctable%>%
+	DT2GR(seqinf=transcript_seqinfo)%>%
 	{mcols(.)$contains_peptide <- ifelse(.$contains_peptide,'Peptide+','-');.} %>%
 	unique%>%
 	{Gviz::AnnotationTrack(
@@ -132,21 +149,27 @@ orftrack<-linc_orfs_dt_with_linctable%>%DT2GR(seqinf=transcript_seqinfo)%>%
 displayPars(orftrack) <- list(height=2)
 
 
-for (rangename in names(ranges_with_goodorf)[1]){
-# for (rangename in 'ENST00000520314'){
-# for (rangename in ranges_with_goodorf%>%names){
+
+
+transcript_orfplot <- function(ranges_with_goodorf,
+	orftrack, # made with the orf dt
+	bigwigpairlist #list of pairs (strands) of wigs in genome space
+	){}
+
+
+for (rangename in names(ranges_with_goodorf)){
+	#get the rnage we need
 	range = ranges_with_goodorf[[rangename]]
 
 
-	rangelength = sum(width(range))
 	rangename%<>%str_replace_all('[\\[\\]]','')
 
 	plottitle <- str_interp("Riboseq Read Profile for:\n${rangename} = ${range}\n")		
 
-	trexons <- GRanges(rangename,IRanges(c(1,cumsum(width(range))[-length(range)]+1),cumsum(width(range))))
 	
+	#construct track showing our exons
 	exontrack<-
-		trexons%>%
+		GRanges(rangename,IRanges(c(1,cumsum(width(range))[-length(range)]+1),cumsum(width(range))))%>%
 		{AnnotationTrack(name='exons',col='black',fill='yellow',strand='*',genome=genome,id=paste0('exon_',seq_along(.)),showFeatureId=TRUE,
 			chr=rangename)}
 
@@ -155,20 +178,24 @@ for (rangename in names(ranges_with_goodorf)[1]){
 	transprofplotfile <- str_interp('plots/loci_riboprofiles/${rangename}_prof')
 #		transprofplotfile%<>%str_replace_all('[^a-zA-z0-9_\\./]+','')
 
-	orfs <- linc_orfs_dt_with_linctable%>%subset(seqnames==rangename)
+	orfs <- orftrack@range%>%subset(seqnames%in%rangename)
 	
+	#calculate plot borders
 	plotstart <- orfs$start%>%min
+	plotend <- orfs$end%>%max
+	orfswidth <- plotend-plotstart
+	plotstart = max(0,plotstart - (orfswidth))
+	rangelength = sum(width(range))
+	plotend = min(rangelength,plotend + (orfswidth))
+	plotgenomewindow <- GRanges(rangename,IRanges(plotstart,plotend))%>%split(.,seqnames(.))
 
 	#select which tracks to show
 	whichwigs <- bigwigpairlist%>%names%>%
 		extract_oneof(cellnames)%>%
 		is_in(extract_oneof(orfs$sample,cellnames))
 
-	plotgenomewindow <- GRanges(rangename,IRanges(plotstart,plotend))%>%split(.,seqnames(.))
-	#ribotrack is 
+	#get the profile track in transcript space
 	ribotracks <- bigwigpairlist[whichwigs]%>%
-		# .[10:11]%>%
-		# map(~get_riboproftrack(range%>%split(.,names(.)),.,rangename))
 		map(~get_riboproftrack(plotgenomewindow,.,rangename))
 
 	

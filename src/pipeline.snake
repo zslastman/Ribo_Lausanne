@@ -9,7 +9,7 @@ def is_over_size(file,n):
   assert os.stat(file).st_size > n
 
 # user set parameter
-TMPDIR = '../tmp'
+TMPDIR = '$TMPDIR'
 SCRIPTDIR = '../git/rna_seq/scripts'
 
 # #reference genome
@@ -482,7 +482,7 @@ rule make_utrs:
 rule fastqc:
      input: reads = lambda wc: [fq.replace('input/','processed_reads/') for fq in SAMPLEFASTQDICT[wc['sample']]]
      output: touch('fastqc/data/{sample}/.done')
-     conda: 'fastqc'
+     conda: '../envs/fastqc'
      threads: 4
      log:'fastqc/reports/{sample}/fastqc.log'      
      shell: r'''
@@ -550,6 +550,7 @@ def get_fastqops(inputdir,read_pattern,lstring='<( zcat ',rstring=')'):
   fastqops = glob.glob(inputdir+'/'+fastqops)
   fastqops.sort()
   assert fastqops
+  assert all([os.stat(fastq).st_size!=0 for fastq in fastqops])
   fastqops = ' '.join(fastqops)
   
   fastqops = lstring+fastqops+')'
@@ -557,7 +558,7 @@ def get_fastqops(inputdir,read_pattern,lstring='<( zcat ',rstring=')'):
   if '-q' in read_pattern:
     fastqops2 = read_pattern.split('-')[2].replace('q ','',1).strip()
     fastqops2 = glob.glob(inputdir+'/'+fastqops2)
-    assert fastqops2
+    assert all([os.stat(fastq).st_size!=0 for fastq in fastqops2])
     fastqops2.sort()
     fastqops2 = ' '.join(fastqops2)
     fastqops2 = lstring+fastqops2+')'
@@ -592,7 +593,6 @@ rule star:
           shell(r"""
             set -x
          MY_TMP_DIR=$(mktemp -d)
-         MY_TMP_DIR=/fast/users/dharnet_m/tmp/test
         trap "set -x; rm -rf ${{MY_TMP_DIR}}" EXIT KILL TERM INT HUP
 
          mkdir -p $MY_TMP_DIR
@@ -917,7 +917,8 @@ rule multiqc:
     reportsdirs=[os.path.dirname(s) for s in list(reportsdirs)]
     shell(r"""
       set -x
-      {multiqcscript} {reportsdirs} -fo $(dirname {output[0]}) -c multiqc_config.yaml
+      at sample_file.txt | sed 's/.fastq.gz//g' | awk 'BEGIN{print "fastqname","samplename"}{print $2,$1}' > multiqc/samplenames.txt
+      {multiqcscript} {reportsdirs} -fo $(dirname {output[0]}) -c multiqc_config.yaml --sample-names multiqc/samplenames.txt
       """)
 
 #this is going to count reads in each library over 5'UTRS, CDS, and 3' UTRs
