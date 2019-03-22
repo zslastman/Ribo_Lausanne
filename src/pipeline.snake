@@ -148,7 +148,7 @@ assert set(FASTQSAMPLES) == set(SAMPLES)
 
 # assert set(ASSAY_DICT.values()) in set(['ribo','total'])
 
-satan_annot_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
+# satan_annot_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
 riboqc_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
 
 ribosamples=list(filter(lambda s: ASSAY_DICT[s] == 'ribo',SAMPLES))
@@ -165,6 +165,9 @@ samplegroups = {
   'OD5P': list(filter(lambda s: 'OD5P' in s,ribosamples)),
   'ONVC': list(filter(lambda s: 'ONVC' in s,ribosamples)),
   'OMM': list(filter(lambda s: 'OMM' in s,ribosamples)),
+  'T1014A': list(filter(lambda s: 'T1014A' in s,ribosamples)),
+  'T1015A': list(filter(lambda s: 'T1015A' in s,ribosamples)),
+  'T1185B': list(filter(lambda s: 'T1185B' in s,ribosamples)),
 }
 
 samplegroups.update(dict(zip(SAMPLES,[[s] for s in SAMPLES] )))
@@ -175,7 +178,7 @@ samplegroups.update(dict(zip(SAMPLES,[[s] for s in SAMPLES] )))
 
 rule all:
   input:
-    FASTQS, GTF_orig,GFF_orig,
+    FASTQS,
     expand("processed_reads/{sample}/.done", sample = SAMPLES),
     # expand("cutsequences/{sample}/cutseqs.txt.gz", sample = SAMPLES),
     # GTF,
@@ -199,10 +202,10 @@ rule all:
     # expand("mergedbigwigs/{group}/{strand}/{istrans}.done",group = GROUPS,strand=strands,istrans=istransvals),
     # expand("ribotaper/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
     # expand('junctioncounts/{sample}/{sample}.junctioncounts.tsv',sample=ribosamples),
-    # expand("SaTAnn/{sample}/.done", sample = ribosamples+groupnames),
+    expand("SaTAnn/{sample}/.done", sample = ribosamples+groupnames),
     expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples+groupnames),
-    expand('groupedsatan/{group}.fasta', group = groupnames),
-   # expand('groupedsatan/{group}.variantmod.fasta', group = groupnames),
+    # expand('groupedsatan/{group}.fasta', group = groupnames),
+    # expand('groupedsatan/{group}.variantmod.fasta', group = groupnames),
 
 # expand("ribotapermetaplots/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
     
@@ -480,15 +483,18 @@ rule make_utrs:
       """) 
 
 rule fastqc:
-     input: reads = lambda wc: [fq.replace('input/','processed_reads/') for fq in SAMPLEFASTQDICT[wc['sample']]]
+     input: 'processed_reads/{sample}/.done'
      output: touch('fastqc/data/{sample}/.done')
-     conda: '../envs/fastqc'
+     conda: 'fastqc'
      threads: 4
-     log:'fastqc/reports/{sample}/fastqc.log'      
-     shell: r'''
+     log:'fastqc/reports/{sample}/fastqc.log'
+     params:
+      reads = lambda wc: [fq.replace('input/','processed_reads/') for fq in SAMPLEFASTQDICT[wc['sample']]],
+      outdir = lambda wc: 'fastqc/data/'+wc.sample+'/'
+     shell: '''
           OUTDIR=$(dirname {output[0]})
-          mkdir -p $OUTDIR
-          wait $(for i in {input.reads}; do $( fastqc -o $OUTDIR $i ) & done) 
+          mkdir -p {params.outdir}
+          wait $(for i in {params.reads}; do $( fastqc -o {params.outdir} $i ) & done) 
         '''
 
 rule collect_fastqc:
@@ -906,7 +912,9 @@ rule multiqc:
       expand("star/data/{sample}/.done", sample = SAMPLES),
       expand("qc/data/{sample}/.done", sample = SAMPLES),
       # expand("tophat2/data/{sample}/.done", sample = SAMPLES),
-      [f.replace('input','filter_reads') for f in  ribofastqs]
+      [f.replace('input','filter_reads') for f in  ribofastqs],
+      expand("feature_counts/data/{sample}/feature_counts", sample = SAMPLES),
+      'sample_file.txt'
  
   output:
     'multiqc/multiqc_report.html'
@@ -916,8 +924,10 @@ rule multiqc:
     reportsdirs=[s.replace('tophat2/data','tophat2/reports') for s in reportsdirs]
     reportsdirs=[os.path.dirname(s) for s in list(reportsdirs)]
     shell(r"""
-      set -x
-      at sample_file.txt | sed 's/.fastq.gz//g' | awk 'BEGIN{print "fastqname","samplename"}{print $2,$1}' > multiqc/samplenames.txt
+      cat sample_file.txt | sed 's/.fastq.gz//g' | sed 's/\t.*\//\t/g' \
+      | awk -vOFS='\t' 'BEGIN{{print "fastqname","samplename"}}{{sumsamp[$1] = sumsamp[$1]+1;print $2,$1"_fq"sumsamp[$1]}}' \
+      > multiqc/samplenames.txt
+
       {multiqcscript} {reportsdirs} -fo $(dirname {output[0]}) -c multiqc_config.yaml --sample-names multiqc/samplenames.txt
       """)
 
@@ -1106,14 +1116,14 @@ rule make_riboqc_anno:
 
 rule run_riboqc:
   input : 'riboqc/annot.done','star/data/{sample}/.done',REF
-  output: touch('riboqc/data/{sample}/.done')
+  output: touch('riboqc/data/{sample}/.done'),'riboqc/data/{sample}/_to_SaTAnn'
   run:
     bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
     shell(r""" 
             mkdir -p riboqc/data/{wildcards.sample}/
             Rscript {riboqc_script} {REF} riboqc/{ANNOBASE}.annoout {bamfile} riboqc/data/{wildcards.sample}/
+    """)
 
-  """)
 
 SaTAnn_script = '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Satan_working_hg38_genc25_May8.R'
 
@@ -1150,14 +1160,13 @@ rule run_satann_group:
     lambda wc: 
       ['riboqc/data/'+s+'/.done' for s in samplegroups[wc['groupname']] ]
   output: touch('SaTAnn/{groupname}/.done')
-  threads: 10
+  threads: 20
   run:
     sinputs = [i.replace('.done','_to_SaTAnn') for i in list(input[:])]
     sinputs = ','.join(sinputs)
     shell(r"""
     mkdir -p $( dirname {output} )
 
-  
       Rscript {SaTAnn_script} \
         {REF} \
         riboqc/{ANNOBASE}.annoout \
@@ -1166,7 +1175,7 @@ rule run_satann_group:
         $(dirname {output})/SaTAnn
 
       """)
-
+#&& [[ -s {output} ]]
 
 ribqc_report='/fast/work/groups/ag_ohler/dharnet_m/satann_working/riboseqc.Rmd'
 rule knit_riboqc:
