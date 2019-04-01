@@ -146,10 +146,6 @@ READRANGEDICT = dict(zip(READRANGES,READRANGENUM))
 
 assert set(FASTQSAMPLES) == set(SAMPLES)
 
-# assert set(ASSAY_DICT.values()) in set(['ribo','total'])
-
-# satan_annot_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
-riboqc_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
 
 ribosamples=list(filter(lambda s: ASSAY_DICT[s] == 'ribo',SAMPLES))
 totalsamples=list(filter(lambda s: ASSAY_DICT[s] == 'total',SAMPLES))
@@ -190,7 +186,6 @@ rule all:
     #expand("infer_experiment/data/{sample}/.done", sample = SAMPLES),
     expand("qc/data/{sample}/.done", sample = SAMPLES),
     ("multiqc/multiqc_report.html"),
-    # expand("riboqc/reports/{sample}/riboqcreport.html", sample = ribosamples),
     # expand("dupradar/data/{sample}/.done", sample = SAMPLES),
     # expand("htseq/data/{sample}/.done", sample = SAMPLES),
     expand('feature_counts_readrange/data/{sample}/{generegions}/{readrange}/.done', sample=RIBO_TOTAL_DICT.keys(), generegions=GENEREGIONS+TRNAs, readrange=READRANGES),
@@ -204,7 +199,7 @@ rule all:
     # expand('junctioncounts/{sample}/{sample}.junctioncounts.tsv',sample=ribosamples),
     expand("SaTAnn/{sample}/.done", sample = ribosamples+groupnames),
     expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples+groupnames),
-    # expand('groupedsatan/{group}.fasta', group = groupnames),
+    expand('groupedsatan/{group}.fasta', group = groupnames),
     # expand('groupedsatan/{group}.variantmod.fasta', group = groupnames),
 
 # expand("ribotapermetaplots/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
@@ -485,7 +480,6 @@ rule make_utrs:
 rule fastqc:
      input: 'processed_reads/{sample}/.done'
      output: touch('fastqc/data/{sample}/.done')
-     conda: 'fastqc'
      threads: 4
      log:'fastqc/reports/{sample}/fastqc.log'
      params:
@@ -1100,28 +1094,42 @@ rule segment_periodicity:
     shell(r"""
     Rscript ../src/segment_periodicity.R
 """)
-
+twobitfile=REF.replace('.fa','.twobit')
 
 satan_annot_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
 riboqc_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
-
+'my_hg19.twobit'
 rule make_riboqc_anno:
   input : GTF
   output: touch('riboqc/annot.done')
   run:
-    shell(r""" 
+  	outdir = output[0].replace('annot.done','')
+  	shell(r"""
+  		set -x 
+    source activate faToTwoBit
+    faToTwoBit my_hg19.fa my_hg19.twobit
+    cat {GTF} | perl -lanpe ' s/GL(\d+).1/chrUN_gl\1/g' > matchchrs.{GTF}
+ 	
+    source activate cortexomics
+	grep -ve 'GL00'  {GTF} > matchchrs.{GTF}
       mkdir -p riboqc
-      Rscript {satan_annot_script} {GTF} riboqc/{ANNOBASE}.riboqc.db riboqc/{ANNOBASE}.annoout
+       R -e ' library(RiboseQC); prepare_annotation_files("{outdir}","{twobitfile}","matchchrs.{GTF}","Homo.sapiens","{ANNOBASE}") '
+
 """)
 
 rule run_riboqc:
   input : 'riboqc/annot.done','star/data/{sample}/.done',REF
-  output: touch('riboqc/data/{sample}/.done'),'riboqc/data/{sample}/_to_SaTAnn'
+  output: touch('riboqc/data/{sample}/.done'),'riboqc/data/{sample}/_for_SaTAnn'
   run:
-    bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
+    annofile = input[0].replace('annot.done','matchchrs.'+GTF+'_Rannot')
+    bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam'
+    outname = output[0].replace('.done','')
+    report_file = 'riboqc/reports/'+wildcards['sample']+'/'+'riboqcreport.html'
     shell(r""" 
-            mkdir -p riboqc/data/{wildcards.sample}/
-            Rscript {riboqc_script} {REF} riboqc/{ANNOBASE}.annoout {bamfile} riboqc/data/{wildcards.sample}/
+    	set -x
+    	mkdir -p {outname}
+    	mkdir -p riboqc/reports/{wildcards.sample}
+        R -e 'library(RiboseQC);RiboseQC::RiboseQC_analysis("{annofile}", bam="{bamfile}",dest_names="{outname}", report_file="{report_file}")' 
     """)
 
 
@@ -1140,7 +1148,7 @@ rule make_chrnamefile:
 #     shell(r"""
 #     mkdir -p $( dirname {output} )
 
-#     if [ ! -s riboqc/data/{wildcards.sample}/_to_SaTAnn ]; then
+#     if [ ! -s riboqc/data/{wildcards.sample}/_for_SaTAnn ]; then
 #       touch $(dirname {output} )/cannot_run_no_psites
 #       exit
 #     fi
@@ -1150,7 +1158,7 @@ rule make_chrnamefile:
 #         {REF} \
 #         riboqc/{ANNOBASE}.annoout \
 #         {threads} \
-#         riboqc/data/{wildcards.sample}/_to_SaTAnn \
+#         riboqc/data/{wildcards.sample}/_for_SaTAnn \
 #         $(dirname {output})/SaTAnn
 
 #       """)
@@ -1162,16 +1170,33 @@ rule run_satann_group:
   output: touch('SaTAnn/{groupname}/.done')
   threads: 20
   run:
-    sinputs = [i.replace('.done','_to_SaTAnn') for i in list(input[:])]
-    sinputs = ','.join(sinputs)
+
+    sinputs = [i.replace('.done','_for_SaTAnn') for i in list(input)]
+    sinputs = list(filter(os.path.isfile,sinputs))
+    nopsites = 'true' if len(sinputs) is 0 else ''
+    print(nopsites)
+    print(sinputs)
+
+    sinputsjoin = ','.join(sinputs)
+
+    # print('\n\n\n')
+    # print( (input[4]))
+    # print('\n\n\n')
+    # print( sinputs[4])
+    # print('\n\n\n')
     shell(r"""
     mkdir -p $( dirname {output} )
 
+     if [ {nopsites} ] ; then
+     	touch $(dirname {output})/nopsites
+     	exit
+     fi
+
       Rscript {SaTAnn_script} \
         {REF} \
-        riboqc/{ANNOBASE}.annoout \
+        riboqc/matchchrs.{GTF}_Rannot \
         {threads} \
-        {sinputs} \
+        {sinputsjoin} \
         $(dirname {output})/SaTAnn
 
       """)
