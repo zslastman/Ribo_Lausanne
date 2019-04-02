@@ -1097,88 +1097,76 @@ rule segment_periodicity:
 """)
 twobitfile=REF.replace('.fa','.twobit')
 
-satan_annot_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
-riboqc_script =  '/fast/work/groups/ag_ohler/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
-'my_hg19.twobit'
 rule make_riboqc_anno:
-  input : GTF
+  input : GFF
   output: touch('riboqc/annot.done')
   run:
-  	outdir = output[0].replace('annot.done','')
-  	shell(r"""
-  		set -x 
-    source activate faToTwoBit
-    faToTwoBit my_hg19.fa my_hg19.twobit
-    cat {GTF} | perl -lanpe ' s/GL(\d+).1/chrUN_gl\1/g' > matchchrs.{GTF}
- 	
-    source activate cortexomics
-	grep -ve 'GL00'  {GTF} > matchchrs.{GTF}
+    shell(r"""
       mkdir -p riboqc
-       R -e ' library(RiboseQC); prepare_annotation_files("{outdir}","{twobitfile}","matchchrs.{GTF}","Homo.sapiens","{ANNOBASE}") '
-
+      Rscript {satan_annot_script} {GTF} riboqc/{ANNOBASE}.riboqc.db riboqc/{ANNOBASE}.annoout
 """)
+
 
 rule run_riboqc:
   input : 'riboqc/annot.done','star/data/{sample}/.done',REF
-  output: touch('riboqc/data/{sample}/.done'),'riboqc/data/{sample}/_for_SaTAnn','riboqc/reports/{sample}/riboqcreport.html'
+  output: touch('riboqc/data/{sample}/.done')
   run:
-    annofile = input[0].replace('annot.done','matchchrs.'+GTF+'_Rannot')
-    bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam'
-    outname = output[0].replace('.done','')
-    report_file = 'riboqc/reports/'+wildcards['sample']+'/'+'riboqcreport.html'
+    bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
     shell(r""" 
-    	set -x
-    	mkdir -p {outname}
-    	mkdir -p riboqc/reports/{wildcards.sample}
-        R -e ' library(RiboseQC);RiboseQC::RiboseQC_analysis("{annofile}", bam="{bamfile}",dest_names="{outname}", report_file="{report_file}");message("done") ' 
-    """)
+            mkdir -p riboqc/data/{wildcards.sample}/
+            Rscript {riboqc_script} {REF} riboqc/{ANNOBASE}.annoout {bamfile} riboqc/data/{wildcards.sample}/
 
+  """)
 
-SaTAnn_script = '/fast/work/groups/ag_ohler/dharnet_m/satann_working/Satan_working_hg38_genc25_May8.R'
+SaTAnn_script = '/fast/groups/ag_ohler/work/dharnet_m/satann_working/Satan_working_hg38_genc25_May8.R'
 
 rule make_chrnamefile:
  input: GTF
  output: 'chrnames.txt'
  shell:r""" cut -d$'\t' -f1 {input} | uniq | sort | uniq | grep -v '#' > {input}"""
 
-    
 rule run_satann_group:
   input :
     lambda wc: 
       ['riboqc/data/'+s+'/.done' for s in samplegroups[wc['groupname']] ]
   output: touch('SaTAnn/{groupname}/.done')
-  threads: 20
+  threads: 10
   run:
-
-    sinputs = [i.replace('.done','_for_SaTAnn') for i in list(input)]
-    sinputs = list(filter(os.path.isfile,sinputs))
-    nopsites = 'true' if len(sinputs) is 0 else ''
-    print(nopsites)
-    print(sinputs)
-
-    sinputsjoin = ','.join(sinputs)
-
-    # print('\n\n\n')
-    # print( (input[4]))
-    # print('\n\n\n')
-    # print( sinputs[4])
-    # print('\n\n\n')
+    sinputs = [i.replace('.done','_to_SaTAnn') for i in list(input[:])]
+    sinputs = ','.join(sinputs)
     shell(r"""
     mkdir -p $( dirname {output} )
 
-     if [ {nopsites} ] ; then
-     	touch $(dirname {output})/nopsites
-     	exit
-     fi
-
+  
       Rscript {SaTAnn_script} \
         {REF} \
-        riboqc/matchchrs.{GTF}_Rannot \
+        riboqc/{ANNOBASE}.annoout \
         {threads} \
-        {sinputsjoin} \
+        {sinputs} \
         $(dirname {output})/SaTAnn
 
       """)
+
+
+ribqc_report='/fast/groups/ag_ohler/work/dharnet_m/satann_working/riboseqc.Rmd'
+rule knit_riboqc:
+  input: 
+    riboqcoutput=lambda wc:
+      ['riboqc/data/'+s+'/.done' for s in samplegroups[wc['groupname']] ],
+    ribqc_report=ribqc_report
+  output: 'riboqc/reports/{groupname}/riboqcreport.html'
+  run:
+    #knitr's file path fuckery means we need to cd and hand it absolute paths, god knows where it's working directory ends up.
+    indata = [i.replace('.done','_results_all_toknit') for i in list(input['riboqcoutput'])]
+    indata = [os.path.abspath(r) for r in indata]
+    indata = ','.join(indata)
+    sinputs = ','.join(samplegroups[wildcards['groupname']])
+    figpath = os.path.abspath(output[0]).replace('.html','')+'_fig'
+    outpath = os.path.abspath(output[0])
+    shell(r"""
+    cd $(dirname {output})
+    R -e 'rmarkdown::render("{input.ribqc_report}",params = list(input_list = "{indata}",input_list_names = "{sinputs}", output_fig_path = "{figpath}"),output_file = "{outpath}")'
+""")
 #&& [[ -s {output} ]]
 
 # ribqc_report='/fast/work/groups/ag_ohler/dharnet_m/satann_working/riboseqc.Rmd'
@@ -1202,7 +1190,6 @@ rule run_satann_group:
 #     cd $(dirname {output})
 #     R -e 'rmarkdown::render("{input.ribqc_report}",params = list(input_list = "{indata}",input_list_names = "{sinputs}", output_fig_path = "{figpath}"),output_file = "{outpath}")'
 # """)
-
 
 VCF_DICT = {'ONVC' : ['../ext_data/vcfs_october_2018/vcfs/0NVC_M07_240517','../ext_data/vcfs_october_2018/vcfs/0NVC_M07_240517/M07_mq_240517.vcf'],
   'OD5P' : ['../ext_data/vcfs_october_2018/vcfs/0D5P_M11_240517/M11_tumor_240517.fasta','../ext_data/vcfs_october_2018/vcfs/0D5P_M11_240517/M11_mq_240517.vcf'],
