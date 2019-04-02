@@ -198,7 +198,8 @@ rule all:
     # expand("ribotaper/{sample}/.done",sample=list(RIBO_TOTAL_DICT.keys())),
     # expand('junctioncounts/{sample}/{sample}.junctioncounts.tsv',sample=ribosamples),
     expand("SaTAnn/{sample}/.done", sample = ribosamples+groupnames),
-    expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples+groupnames),
+    expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples),
+    # expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples+groupnames),
     expand('groupedsatan/{group}.fasta', group = groupnames),
     # expand('groupedsatan/{group}.variantmod.fasta', group = groupnames),
 
@@ -1119,7 +1120,7 @@ rule make_riboqc_anno:
 
 rule run_riboqc:
   input : 'riboqc/annot.done','star/data/{sample}/.done',REF
-  output: touch('riboqc/data/{sample}/.done'),'riboqc/data/{sample}/_for_SaTAnn'
+  output: touch('riboqc/data/{sample}/.done'),'riboqc/data/{sample}/_for_SaTAnn','riboqc/reports/{sample}/riboqcreport.html'
   run:
     annofile = input[0].replace('annot.done','matchchrs.'+GTF+'_Rannot')
     bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam'
@@ -1129,7 +1130,7 @@ rule run_riboqc:
     	set -x
     	mkdir -p {outname}
     	mkdir -p riboqc/reports/{wildcards.sample}
-        R -e 'library(RiboseQC);RiboseQC::RiboseQC_analysis("{annofile}", bam="{bamfile}",dest_names="{outname}", report_file="{report_file}")' 
+        R -e ' library(RiboseQC);RiboseQC::RiboseQC_analysis("{annofile}", bam="{bamfile}",dest_names="{outname}", report_file="{report_file}");message("done") ' 
     """)
 
 
@@ -1140,28 +1141,6 @@ rule make_chrnamefile:
  output: 'chrnames.txt'
  shell:r""" cut -d$'\t' -f1 {input} | uniq | sort | uniq | grep -v '#' > {input}"""
 
-# rule run_satann:
-#   input : 'riboqc/data/{sample}/.done'
-#   output: touch('SaTAnn/{sample}/.done')
-#   threads: 10
-#   run:
-#     shell(r"""
-#     mkdir -p $( dirname {output} )
-
-#     if [ ! -s riboqc/data/{wildcards.sample}/_for_SaTAnn ]; then
-#       touch $(dirname {output} )/cannot_run_no_psites
-#       exit
-#     fi
-
-  
-#       Rscript {SaTAnn_script} \
-#         {REF} \
-#         riboqc/{ANNOBASE}.annoout \
-#         {threads} \
-#         riboqc/data/{wildcards.sample}/_for_SaTAnn \
-#         $(dirname {output})/SaTAnn
-
-#       """)
     
 rule run_satann_group:
   input :
@@ -1202,25 +1181,27 @@ rule run_satann_group:
       """)
 #&& [[ -s {output} ]]
 
-ribqc_report='/fast/work/groups/ag_ohler/dharnet_m/satann_working/riboseqc.Rmd'
-rule knit_riboqc:
-  input: 
-    riboqcoutput=lambda wc:
-      ['riboqc/data/'+s+'/.done' for s in samplegroups[wc['groupname']] ],
-    ribqc_report=ribqc_report
-  output: 'riboqc/reports/{groupname}/riboqcreport.html'
-  run:
-    #knitr's file path fuckery means we need to cd and hand it absolute paths, god knows where it's working directory ends up.
-    indata = [i.replace('.done','_results_all_toknit') for i in list(input['riboqcoutput'])]
-    indata = [os.path.abspath(r) for r in indata]
-    indata = ','.join(indata)
-    sinputs = ','.join(samplegroups[wildcards['groupname']])
-    figpath = os.path.abspath(output[0]).replace('.html','')+'_fig'
-    outpath = os.path.abspath(output[0])
-    shell(r"""
-    cd $(dirname {output})
-    R -e 'rmarkdown::render("{input.ribqc_report}",params = list(input_list = "{indata}",input_list_names = "{sinputs}", output_fig_path = "{figpath}"),output_file = "{outpath}")'
-""")
+# ribqc_report='/fast/work/groups/ag_ohler/dharnet_m/satann_working/riboseqc.Rmd'
+# rule knit_riboqc:
+#   input: 
+#     riboqcoutput=lambda wc:
+#       ['riboqc/data/'+s+'/.done' for s in samplegroups[wc['groupname']] ],
+#     indata=lambda wc:
+#       ['riboqc/data/'+s+'/_results_RiboseQC_alld' for s in samplegroups[wc['groupname']] ],
+#     ribqc_report=ribqc_report
+#   output: 'riboqc/reports/{groupname}/riboqcreport.html'
+#   run:
+#     #knitr's file path fuckery means we need to cd and hand it absolute paths, god knows where it's working directory ends up.
+#     indata = input['indata']
+#     indata = [os.path.abspath(r) for r in indata]
+#     indata = ','.join(indata)
+#     sinputs = ','.join(samplegroups[wildcards['groupname']])
+#     figpath = os.path.abspath(output[0]).replace('.html','')+'_fig'
+#     outpath = os.path.abspath(output[0])
+#     shell(r"""
+#     cd $(dirname {output})
+#     R -e 'rmarkdown::render("{input.ribqc_report}",params = list(input_list = "{indata}",input_list_names = "{sinputs}", output_fig_path = "{figpath}"),output_file = "{outpath}")'
+# """)
 
 
 VCF_DICT = {'ONVC' : ['../ext_data/vcfs_october_2018/vcfs/0NVC_M07_240517','../ext_data/vcfs_october_2018/vcfs/0NVC_M07_240517/M07_mq_240517.vcf'],
