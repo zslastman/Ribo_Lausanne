@@ -10,3 +10,13 @@ pipeline
 *fastq.gz
 *fastq
 *html
+ext_data
+contaminants
+envs
+export
+input
+pipeline_fasta
+plots
+presentations_posters
+tables
+
