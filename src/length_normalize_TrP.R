@@ -1,7 +1,17 @@
 satanngtfs <- Sys.glob('SaTAnn/*/SaTAnn_Detected_ORFs.gtf')
+satannfastas <- Sys.glob('groupedsatan/*.fasta')
+
+satanfastaorfs <- map(satannfastas,.%>%readLines%>%str_subset('>')%>%str_extract(regex('(?<=>).*?(?=\\|)')))
+names(satanfastaorfs) <- satannfastas%>%basename%>%str_replace('.fasta','')
+
 source('../src/functions.R')
+library(data.table)
+library(GenomicRanges)
+library(tidyverse)
+slice<-dplyr::slice
 
 for(satanngtffile in satanngtfs){
+	
 	message(satanngtffile)
 	satanngtf <- rtracklayer::import(satanngtffile)
 
@@ -11,16 +21,21 @@ for(satanngtffile in satanngtfs){
 		GR2DT%>%
 		group_by(gene_id)%>%
 		slice(which.max(Iso_pct_TrP)) %>%
-		select(ORF_id,TrP,P_sites)%>%
+		select(ORF_id,TrP_pNpM,P_sites)%>%
 		write_tsv(str_replace(satanngtffile,'.gtf$','.TrPvals.tsv'))
 
 }
 
-Sys.glob('SaTAnn/*/*.TrPvals.tsv')%>%setNames(.,.)%>%map_df(fread,.id='file')%>%
+'ENST00000443026_1427_1546'
+
+Sys.glob('SaTAnn/*/*.TrPvals.tsv')%>%
+	setNames(.,.)%>%map_df(fread,.id='file')%>%
 	mutate(sample=basename(dirname(file)))%>%
-	select(sample,gene_id,ORF_id,TrP)%>%
-	spread(sample,TrP)%>%
+	select(sample,gene_id,ORF_id,TrP_pNpM)%>%
+	spread(sample,TrP_pNpM)%>%
 	write_tsv('SaTAnn/all_TrPs.tsv')
+
+normalizePath('SaTAnn/all_TrPs.tsv')
 
 allorfexprdf<-fread('SaTAnn/all_TrPs.tsv')
  orfids <- allorfexprdf%>%.$ORF_id 

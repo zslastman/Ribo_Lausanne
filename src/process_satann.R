@@ -1,4 +1,4 @@
-library(svglite)
+# library(svglite)
 library(readr)
 library(Biostrings)
 library(Rsamtools)
@@ -57,12 +57,6 @@ orfs_dt <- all_orfs%>%map(.%>%{
 	issimplelist <- mcols(.)%>%vapply(is,TRUE,'atomic')
 	.[,issimplelist]%>%GR2DT
 })%>%bind_rows(.id='sample')
-
-
-# orfs_dt%<>%group_by(sample)%>%mutate(fdr =  p.adjust(pval, method='fdr'))
-# orfs_dt %<>% dplyr::filter(fdr<0.05)%>%ungroup
-
-
 #TODO - eveyrthing in linc
 
 n_genes_translated <- orfs_dt %>% group_by(sample)%>%dplyr::summarise(n_genes=n_distinct(gene_id))
@@ -104,7 +98,7 @@ corpval<-cortest$p.value%>%round(5)
 corest<-cortest$estimate%>%round(5)
 
 #Plot number of 
-svg(h=4,w=6,'../plots/n_trunc_genes_vs_fp_bias.svg')
+pdf(h=4,w=6,'../plots/n_trunc_genes_vs_fp_bias.svg')
 qplot(satann_summary_table$fp_bias^(-1),satann_summary_table$frac_genes_ntrunc)+
 	scale_x_continuous(name="Read 5' ends AUG-250/250-500")+
 	scale_y_continuous(name='Genes with only N-truncations')+
@@ -118,7 +112,7 @@ cortest<-cor.test(satann_summary_table$shortORF_frac,satann_summary_table$frac_g
 corpval<-cortest$p.value%>%formatC(format = "e", digits = 2)
 corest<-cortest$estimate%>%round(2)
 
-svg(h=4,w=6,'../plots/shortORF_frac.svg'%T>%{normalizePath(.)%>%message})
+pdf(h=4,w=6,'../plots/shortORF_frac.svg'%T>%{normalizePath(.)%>%message})
 qplot(satann_summary_table$shortORF_frac,satann_summary_table$frac_genes_ntrunc)+
 	scale_x_continuous(name="Read 5' ends AUG-250/250-500")+
 	scale_y_continuous(name='Fraction of ORFs that are less than 250bp long')+
@@ -132,7 +126,7 @@ satann_summary_table$sample
 
 mergesamples<-satann_summary_table$sample%>%grep(v=T,inv=T,patt='_')
 
-svg(h=4,w=6,'/fast_new/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/fp_bias_batches.svg')
+pdf(h=4,w=6,'/fast_new/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/fp_bias_batches.svg')
 satann_summary_table%>%
 	filter(!sample %in% mergesamples)%>%
 	mutate(new = sample%>%str_detect('ctrl\\d+(B|L)'))%>%
@@ -170,6 +164,7 @@ allgorfs <- allgorfs[!duplicated(paste0(names(allgorfs),as.character(allgorfs)))
 allgorfs$ORF_id_tr <- names(allgorfs)
 groupsamples <- names(all_orfs)%>%str_subset('OD5P')
 
+cell_line_i<-'OD5P'
 for(cell_line_i in c('OD5P','ONVC','OMM')){
 
 	groupsamples <- c(groupsamples%>%str_subset('^[^_]+$'),groupsamples)%>%unique

@@ -92,6 +92,7 @@ FRAG_LENGTH_SD_DICT   = tab_to_dict(SAMPLELINES, 'fragment_length_sd')
 ASSAY_DICT            = tab_to_dict(SAMPLELINES, 'assay')
 GTF_DICT              = {k: CDSGTF if 'ribo' in v else GTF for k, v in ASSAY_DICT.items()}
 
+
 #for f in $(echo input/*); do for q in $( echo ${f}/* ); do echo $f $q; done; done | sed 's/input\///' > pipeline/sample_file.txt
 SAMPLEFASTQLINES = [line.strip().split('\t') for line in open("sample_file.txt").readlines()]
 FASTQS = [l[1] for l in SAMPLEFASTQLINES]
@@ -157,6 +158,7 @@ totalfastqs=list(filter(lambda fq: FASTQSAMPLEDICT[fq] == totalsamples,FASTQS))
 
 
 groupnames = ['OD5P','ONVC','OMM']
+
 samplegroups = {
   'OD5P': list(filter(lambda s: 'OD5P' in s,ribosamples)),
   'ONVC': list(filter(lambda s: 'ONVC' in s,ribosamples)),
@@ -199,6 +201,7 @@ rule all:
     # expand('junctioncounts/{sample}/{sample}.junctioncounts.tsv',sample=ribosamples),
     expand("SaTAnn/{sample}/.done", sample = ribosamples+groupnames),
     expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples),
+    expand('riboqc/data/{sample}/_to_SaTAnn', sample = ribosamples),
     # expand('riboqc/reports/{sample}/riboqcreport.html', sample = ribosamples+groupnames),
     expand('groupedsatan/{group}.fasta', group = groupnames),
     # expand('groupedsatan/{group}.variantmod.fasta', group = groupnames),
@@ -1099,20 +1102,23 @@ twobitfile=REF.replace('.fa','.twobit')
 
 rule make_riboqc_anno:
   input : GFF
-  output: touch('riboqc/annot.done')
+  output: touch('riboqc/annot.done'),'riboqc/'+ANNOBASE+'.annoout'
   run:
     shell(r"""
       mkdir -p riboqc
-      Rscript {satan_annot_script} {GTF} riboqc/{ANNOBASE}.riboqc.db riboqc/{ANNOBASE}.annoout
+      grep -Pe '^chr[0-9XYM]' {GTF} > ribogtf.gtf 
+      Rscript {satan_annot_script} ribogtf.gtf riboqc/{ANNOBASE}.riboqc.db riboqc/{ANNOBASE}.annoout
 """)
 
 
 rule run_riboqc:
-  input : 'riboqc/annot.done','star/data/{sample}/.done',REF
-  output: touch('riboqc/data/{sample}/.done')
+  input : 'riboqc/annot.done','star/data/{sample}/.done',REF,'riboqc/'+ANNOBASE+'.annoout'
+  output: touch('riboqc/data/{sample}/.done'),'riboqc/data/{sample}/_to_SaTAnn'
   run:
     bamfile = 'star/data/'+wildcards['sample']+'/'+wildcards['sample']+'.bam' 
     shell(r""" 
+            set -x
+            source activate R
             mkdir -p riboqc/data/{wildcards.sample}/
             Rscript {riboqc_script} {REF} riboqc/{ANNOBASE}.annoout {bamfile} riboqc/data/{wildcards.sample}/
 
@@ -1136,7 +1142,7 @@ rule run_satann_group:
     sinputs = ','.join(sinputs)
     shell(r"""
     mkdir -p $( dirname {output} )
-
+  source activate R
   
       Rscript {SaTAnn_script} \
         {REF} \
@@ -1147,6 +1153,8 @@ rule run_satann_group:
 
       """)
 
+satan_annot_script =  '/fast/groups/ag_ohler/work/dharnet_m/satann_working/Annot_make_bioc_gtf.R'
+riboqc_script =  '/fast/groups/ag_ohler/work/dharnet_m/satann_working/analysis_qc_mod_jan2018_12.R'
 
 ribqc_report='/fast/groups/ag_ohler/work/dharnet_m/satann_working/riboseqc.Rmd'
 rule knit_riboqc:

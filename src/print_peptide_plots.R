@@ -106,9 +106,12 @@ transcript_orfplot <- function(trname,trcellname,
 		map(~get_riboproftrack(setNames(GRangesList(range),trname),.,trname))
 
 	max_y <- ribotracks%>%map(~.@data[,overlapsAny(.@range,orftrack@range,ign=TRUE)]%>%max)%>%unlist%>%max%>%divide_by(10)%>%ceiling%>%multiply_by(10)
+	max_y=log2(max_y)
 
+	for(i in seq_along(ribotracks)){
+		displayPars(ribotracks[[i]])$ylim <- c(0,max_y)
 
-	for(i in seq_along(ribotracks))displayPars(ribotracks[[i]])$ylim <- c(0,max_y)
+	}
 	displayPars(peptide_track)$col.id <- 'black'
 	# add_legendtrack <- function(ribotracks){
 	# 	l<-length(ribotracks)
@@ -137,7 +140,9 @@ transcript_orfplot <- function(trname,trcellname,
 		),
 		type='hist',
 		col.labels='black',
-		chr=seqnames(range)
+		chr=seqnames(range),
+		transformation = function(x) {log2(x+1)}
+		NULL
 	)
 	dev.off()
 
@@ -179,12 +184,14 @@ peptide_track<- peptide_hits_df%>%
 
 peptide_trs <- peptide_hits_df$transcript_id%>%unique
 
-for (trname in addtr){
+# for (trname in addtr){
+for (trname in peptide_trs){
 	trcellnames <- peptide_hits_df%>%
 		filter(transcript_id==trname)%>%.$sample%>%
 		extract_oneof(cellnames)%>%unique
 
 	trcellnames%<>%str_subset('OD5P')
+	
 	for(trcellname in trcellnames){
 		#select which tracks to show
 
@@ -194,3 +201,6 @@ for (trname in addtr){
 		transcript_orfplot(trname,trcellname,exons,orftrack,peptide_track,bigwigs2plot)
 	}
 }
+
+
+

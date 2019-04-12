@@ -64,6 +64,38 @@ sampdt <- orfs_dt%>%filter(sample==sample_i)
 pieboxfile<-str_interp('../plots/merged_summary2/${sample_i}_pie_box.pdf')
 pieboxfile%>%dirname%>%dir.create
 
+
+#UORF COVERAGE
+uorfs <- satannorfs%>%map(7)
+for(i in seq_along(uorfs)) uorfs[[i]]$sample <- names(uorfs)[i]
+
+rawpsitedf <- uorfs%>%map(.%>%mcols%>%.[c('sample','P_sites_raw','ORF_category_Tx_compatible')]%>%
+	as.data.frame)%>%
+	bind_rows%>%
+	filter(ORF_category_Tx_compatible%in%c('uORF','ORF_annotated'))
+
+mappedreadnums<-Sys.glob('star/reports/*/*bamstats*')%>%setNames(.,basename(dirname(.)))%>%map(.%>%readLines%>%str_subset('mapped')%>%.[[1]]%>%str_extract('\\d+'))%>%
+	enframe%>%unnest%>%mutate(value = as.numeric(value) / 1e6 )%>%
+	as.data.frame
+
+mappedreadnums%<>%arrange(value)
+mappedreadnums%<>%mutate(value=round(value,1))
+
+rawpsitedf$sample%>%unique%>%setdiff(mappedreadnums$name)
+
+rawpsitedf$sample%<>%factor(mappedreadnums$name%>%unique)
+levels(rawpsitedf$sample) %<>% paste0('_',mappedreadnums$value)
+rawpsitedf%<>%filter(!is.na(sample))
+
+pdf('../plots/uorf_quant_histogram.pdf',w=21,h=21)
+rawpsitedf%>%ggplot(aes(x=P_sites_raw,fill=ORF_category_Tx_compatible))+geom_histogram(alpha=I(0.8))+facet_wrap(~sample)+
+	scale_x_log10()+
+	coord_cartesian(xlim=c(1,1e3),ylim=c(1,200))
+dev.off()
+message(normalizePath('../plots/uorf_quant_histogram.pdf'))
+
+
+
 #make charts
 pdf(pieboxfile,h=3.5,w=10)
 par(oma=c(0,0,0,5))

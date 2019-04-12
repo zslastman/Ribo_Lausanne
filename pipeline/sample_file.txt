@@ -140,6 +140,6 @@ T1015A_ctrl_chx_1	input/T1015A_ctrl_chx_1/T1015Apluschx_S10_R1_001.fastq.gz
 T1185B_ctrl_nochx_1	input/T1185B_ctrl_nochx_1/T1185b-chx_S13_R1_001.fastq.gz
 T1185B_ctrl_chx_1	input/T1185B_ctrl_chx_1/T1185Bpluschx_S12_R1_001.fastq.gz
 ONVC_ctrl_nochx_1	input/ONVC_ctrl_nochx_1/0NVC-chx_S14_R1_001.fastq.gz
-OMM475_nochx	input/OMM475_nochx/0MM475_minus_chx_S4_R1_001.fastq.gz
-OMM475_plus_chx	 input/OMM475_plus_chx/0MM475_plus_chx_S3_R1_001.fastq.gz
-ONVC_minus_chx	input/ONVC_minus_chx/0NVC_minus_chx_S1_R1_001.fastq.gz
+OMM475_ctrl_nochx_1	input/OMM475_nochx/0MM475_minus_chx_S4_R1_001.fastq.gz
+OMM475_ctrl_chx_1	input/OMM475_plus_chx/0MM475_plus_chx_S3_R1_001.fastq.gz
+ONVC_ctrl_nochx_1	input/ONVC_minus_chx/0NVC_minus_chx_S1_R1_001.fastq.gz
