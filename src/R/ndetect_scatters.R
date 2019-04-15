@@ -19,7 +19,7 @@ lncRNA_peptide_file <- '../ext_data/20190415_lncRNA_RNAseqmax_FINAL.txt'
 
 message('...done')
 
-GTF_annotation<-load_obj(annofile)
+if(!exists("GTF_annotation")) GTF_annotation<-load_obj(annofile)
 
 #get the orfs in the fasta file I sent
 fasta = '../export/ORFs/Fastas/OD5P/OD5P.fasta'
@@ -34,9 +34,12 @@ all(sentorfs %in% sentgtf$ORF_id_tr)
 
 #read in the data on the lincRNA peptides
 lncRNA_table <- fread(lncRNA_peptide_file)
-	set_colnames(c("MS-identified peptide", "gene_id", "Gene Name", 
-"Gene Type", "FPKM RNAseq OD5PCTRL", "FPKM RNAseq DAC"))
+	# set_colnames(c("MS-identified peptide", "gene_id", "Gene Name", 
+# "Gene Type", "FPKM RNAseq OD5PCTRL", "FPKM RNAseq DAC"))
+lncRNA_table%<>%set_colnames(c("peptide","transcript_id",  "Gene Name","gene_id"))
 clipid <- . %>% str_replace('\\.\\d+$','')
+
+
 lncRNA_table$gene_id%<>%clipid
 #many of the genes for this aren't in our feature_counts_all....
 #allcountdf[feature_id %in% lncRNA_table$gene_id,]
@@ -45,20 +48,25 @@ stopifnot(lncRNA_table$gene_id %in% names(GTF_annotation$genes))
 
 #So where are they lost..
 lincgenetranscripts<-GTF_annotation$txs_gene[lncRNA_table$gene_id]
+g2tx <- lincgenetranscripts%>%unlist%>%{data_frame(gid=names(.),trid=.$tx_name)}%>%distinct(gid,trid)
 lincgeneexons <- GTF_annotation$exons_txs[GTF_annotation$txs_gene[lncRNA_table$gene_id]%>%unlist%>%.$tx_name]
+lincgeneexons<-lincgeneexons%>%unlist%>%{split(.,g2tx$gid[match(names(.),g2tx$trid)])}
+
+# genegr<-lincgenetranscripts
+genegr<- lincgeneexons
 
 
 #Get the matrix of raw counts for these
 allbams <- Sys.glob('star/data/*/*.bam')
 allbams %<>% str_subset('OD5P')
-ovdata<-summarizeOverlaps(features=lincgenetranscripts,reads = allbams,inter.feature=FALSE)
+ovdata<-summarizeOverlaps(features=genegr,reads = allbams,inter.feature=FALSE)
 countmat <- assay(ovdata)
 colnames(countmat)%<>%str_replace('.bam$','')
 
 #And psite counts
 allresfiles <- Sys.glob('riboqc/data/*/*to_SaTAnn*')
-allresobs<-allresfiles%>%mclapply(load_objs)
-names(allresobs)<-allresfiles%>%dirname%>%basename
+if(!exists('allpsiteobs')) allpsiteobs<-allresfiles%>%mclapply(load_objs)
+names(allpsiteobs)<-allresfiles%>%dirname%>%basename
 
 
 getCounts<-function(features,reads){
@@ -74,19 +82,19 @@ getCounts<-function(features,reads){
 
 ribosamps <- colnames(countmat)%>%str_subset('L[57]',neg=T)
 
-psitecountmat <- lapply(allresobs%>%map('to_SaTAnn')%>%map('P_sites_all')%>%.[ribosamps],getCounts,features=lincgenetranscripts)
+psitecountmat <- lapply(allpsiteobs%>%map('to_SaTAnn')%>%map('P_sites_all')%>%.[ribosamps],getCounts,features=genegr)
 psitecountmat%<>%simplify2array
-psitecountmat%<>%set_rownames(names(lincgenetranscripts))
+psitecountmat%<>%set_rownames(names(genegr))
 
 
 
-gids2plot <- lncRNA_table$gene_id
-gids2plot==names(lincgenetranscripts)
-gids2plot==rownames(psitecountmat)
-gids2plot==rownames(countmat)
+gids2plot <- lncRNA_table$gene_id%>%unique
+
+stopifont(gids2plot%in%rownames(psitecountmat))
+stopifont(gids2plot%in%rownames(countmat))
 
 ##Now we need to test how many genes have nested stuff in them....
-complex_locus <- lincgenetranscripts%>%countOverlaps(GTF_annotation$genes)%>%`>`(1)
+complex_locus <- genegr[gids2plot]%>%countOverlaps(GTF_annotation$genes)%>%`>`(1)
 
 
 
@@ -99,31 +107,28 @@ fracdetected<-readRDS(scdetectfile)
 table(lncRNA_table$gene_id %in% fracdetected$ensemblID)
 stopifnot(sum(unique(lncRNA_table$gene_id) %in% fracdetected$ensemblID)==35)
 #create named vector with cell fractions
-scRNAseq_fraction <- lincgenetranscripts%>%
-	names%>%
+scRNAseq_fraction <-gids2plot%>%setNames(.,.)%>%
 	match(fracdetected$ensemblID)%>%
 	fracdetected$detected[.]%>%
 	replace_na(0)
 
 
 
-`Gene has ORF` = gids2plot %in% sent_gid5
+`Gene has ORF` = gids2plot %in% sent_gids
 
 sentseqs <- readAAStringSet(fasta)
-lncRNA_table$peptide %in% sentseqs
-peptide_hits <- lncRNA_table$peptide%>%lapply(vmatchPattern,subject=sentseqs)%>%map_dbl(.%>%unlist%>%length)
-table(peptide_hits==0)
+lncRNA_table$peptide_hit <- lncRNA_table$peptide%>%lapply(vmatchPattern,subject=sentseqs)%>%map_dbl(.%>%unlist%>%length)
+table(lncRNA_table$peptide_hit!=0)
 
-mycanonseq <- readAAStringSet('my_gencode.v24lift37.annotation.protein.fa')
+mycanonseq <- readA5AStringSet('my_gencode.v24lift37.annotation.protein.fa')
 peptide_hits_canon <- lncRNA_table$peptide%>%lapply(vmatchPattern,subject=mycanonseq)%>%map_dbl(.%>%unlist%>%length)
-table(peptide_hits==0)
-
-table(peptide_hits_canon)
+table(peptide_hits!=0)
 
 
-#checking with fuzzy match
-peptide_hits_fuzzy <- lncRNA_table$peptide[`Gene has%>%lapply(vmatchPattern,max.mismatch=1,subject=sentseqs)%>%map_dbl(.%>%unlist%>%length)
-table(peptide_hits_fuzzy==0)
+
+# #checking with fuzzy match
+# peptide_hits_fuzzy <- lncRNA_table$peptide[`Gene has%>%lapply(vmatchPattern,max.mismatch=1,subject=sentseqs)%>%map_dbl(.%>%unlist%>%length)
+# table(peptide_hits_fuzzy==0)
 
 
 
@@ -132,26 +137,22 @@ table(peptide_hits_fuzzy==0)
 # lncRNA_table$peptide = lncRNA_table[[1]]
 #  <- lncRNA_table%>%mutate(found = peptide %in% peptide_info_df$peptide)%>%{setNames(.$found,.$gene_id)}
 sentseqs<- readAAStringSet(fasta)
-`Peptide in ORF` <- lncRNA_table$peptide%>%mclapply(vmatchPattern,subject=sentseqs)%>%map_lgl(.%>%unlist%>%length%>%`>`(0))
+lncRNA_table$`peptidehit` <- lncRNA_table$peptide%>%mclapply(vmatchPattern,subject=sentseqs)%>%map_lgl(.%>%unlist%>%length%>%`>`(0))
+`peptidehit` <- lncRNA_table%>%group_by(gene_id)%>%summarise(`peptidehit`=any(`peptidehit`))%>%{setNames(.$`peptidehit`,.$gene_id)}%>%.[gids2plot]
 
-stopifnot(`Peptide in ORF`%>%table == (c(46,14)))
-stopifnot(is.na(scRNAseq_fraction)%>%not%>%table == (c(29,31)))
+stopifnot(lncRNA_table$`Peptide in ORF`%>%table == (c(61,16)))
+stopifnot((scRNAseq_fraction)%>%`==`(0)%>%not%>%table == (c(36,35)))
 
 #label outliers
 labels2plot <- gids2plot%>%setNames(.,.)
 labels2plot[`Gene has ORF`]<- ''
-labels2plotscRNAseq <- labels2plot
+labels2plotscRNAseq <-labels2plot
 labels2plotscRNAseq[scRNAseq_fraction < 0.1 ]<-''
 labels2plotspsites <- labels2plot
 labels2plotspsites[psitecountmat[gids2plot,ribosamps]%>%rowSums%>%`<`(130) ]<-''
 
 
-intersect(labels2plotspsites,labels2plotscRNAseq)
-
 library(ggrepel)
-###Make scatterplot of psites vs raw reads to see if we're losing a lot in processing
-
-
 psiterawreadscatterfile<-'/fast/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/psite_rawread_hitscatter.pdf'
 pdf(psiterawreadscatterfile)
 plot<-qplot(
@@ -166,28 +167,10 @@ plot<-qplot(
 	theme_bw()+
 	geom_text_repel(alpha=I(0.5),show.legend=FALSE)+
 	geom_abline(slope=1,linetype=2)+
-	ggtitle('Psites vs. Reads for all\nlincRNA hit peptide attributed Genes')
+	ggtitle('Psites vs. Reads for all\nlincRNA hit peptide attributed Genes\nexons only')
 ggMarginal(plot,groupColour=TRUE,groupFill=TRUE)
 dev.off();message(normalizePath(psiterawreadscatterfile))
-
-psite_scrnaseq<-'/fast/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/psite_scrnaseq_hitscatter.pdf'
-pdf(psite_scrnaseq)
-plot<-qplot(
-	x=scRNAseq_fraction,
-	xlab='Log Normalized scRNAseq OD5P',
-	y=psitecountmat[gids2plot,ribosamps]%>%rowSums%>%add(1),ylab='Raw Psite Counts OD5P all Ribo samples',
-	log='y',
-	shape=`Peptide in ORF`,
-	color = `Gene has ORF`,
-	label=labels2plotscRNAseq,
-	fill = `Gene has ORF`)+
-	geom_text_repel(alpha=I(0.5),show.legend=FALSE)+
-	theme_bw()+
-	ggtitle('Psites vs. scRNAseq for all\nlincRNA hit peptide attributed Genes')
-# ggMarginal(plot)
-print(plot)
-dev.off();message(normalizePath(psite_scrnaseq))
-
+ 
 
 psite_scrnaseq<-'/fast/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/psite_scrnaseq_hitscatter.pdf'
 pdf(psite_scrnaseq)
@@ -229,22 +212,21 @@ psitecountmat[,ribosamps]%>%rowSums%>%add(1)
 #we could also look at the TEs of these genes...
 
 
-#load arguments
+#load arguments%>%length
 args <- c(
 	allfeatcounts = 'feature_counts/all_feature_counts',
 	genelengthfile = 'feature_counts/data/OD5P_05_uM_DAC_1/OD5P_05_uM_DAC_1.feature_counts',
-	outfile = 'feature_counts/all_rpkms.txt'
+= 'feature_counts/all_rpkms.txt'
 )
-args <- commandArgs(trailingOnly=TRUE)[1:length(args)]%>%setNames(names(args))
+= 'feature_counts/all_rpkms.txt'
+
 for(i in names(args)) assign(i,args[i])
-
 genelengthdf <- genelengthfile%>%fread
-allcountdf <- allfeatcounts%>%fread
-
+allcountdf <! allfeatcounts%>%fread
 genelengths <- genelengthdf$Length[match(allcountdf$feature_id,genelengthdf$Geneid)]
-
+5
 #allanno <- import('my_gencode.v24lift37.annotation.gtf')
-debug(counts_to_tpm)
+debug(counts_to_t!m)
 
 
 fraglengths<-colnames(allcountdf[,-1])%>%{ifelse(str_detect(.,'_L[57]'),101,29)}
@@ -274,7 +256,7 @@ y <- DGEList(counts=allcountdf[,-1],genes=data.frame(gene_id = allcountdf$featur
 y <- calcNormFactors(y)
 RPKM <- rpkm(y)
 
-RPKM%>%as.data.frame%>%
+RPKM%>%length%>%as.data.frame%>%
 	mutate(gene_id=allcountdf$feature_id)%>%
 	mutate(gene_id=allcountdf$feature_id)%>%
 	dplyr::select(-matches('_L5|_L7'))%>%
@@ -283,19 +265,16 @@ RPKM%>%as.data.frame%>%
 
 
 
+so for the highly transcribed-but-not-detected gene, it looks like it's not detected because the P-sites are attributed to a different gene....#' gene detected by satann: 'ENSG00000214391' 
 
-#' so for the highly transcribed-but-not-detected gene, it looks like it's not detected because the P-sites are attributed to a different gene....
-#' gene detected by satann: 'ENSG00000214391' 
-#' gene attributed to peptide 'ENSG00000261645'
 testpeptide <- lncRNA_table%>%filter(gene_id=='ENSG00000261645')%>%.[[1]]
-
 #the psites their TRANSCRIPTS overlap, is identical
-GTF_annotation$txs_gene['ENSG00000214391']%>%mergeByOverlaps(to_SaTAnn$P_sites_all)%>%.$score
+GTF_annotation$txs_gene!'ENSG00000214391']%>%mergeByOverlaps(to_SaTAnn$P_sites_all)%>%.$score
 GTF_annotation$txs_gene['ENSG00000261645']%>%mergeByOverlaps(to_SaTAnn$P_sites_all)%>%.$score
 
-stestpeptideproteins
+stestpeptideprote5ins
 
-str_detect(proteins,testpeptide)
+str_detect(prote!ns,testpeptide)
 
 GTF_annotation$txs_gene['ENSG00000214391']%>%unlist%>%export('nested.gtf')
 GTF_annotation$txs_gene['ENSG00000214391']%>%unlist%>%export('nestee.gtf')
@@ -321,26 +300,25 @@ peptide_info_df%>%filter(gene_id=='ENSG00000261645')
 #Next weird case....
 highpsitenames <- countmat[,ribosamps]%>%rowSums%>%keep(~ log10(.) > 3.5)%>%sort%>%names
 
-plotdf<-enframe(countmat[,ribosamps]%>%rowSums,'gene','reads')%>%cbind(psites=psitecountmat[,ribosamps]%>%rowSums)%>%
+plotdf<-enframe%>%length(countmat[,ribosamps]%>%rowSums,'gene','reads')%>%cbind(psites=psitecountmat[,ribosamps]%>%rowSums)%>%
 	mutate(called=`3bp Periodicity`,complex_locus=complex_locus)%>%
 	# filter(called==FALSE)%>%
 	arrange(desc(reads))
 
 testgene<-plotdf%>%filter(called==FALSE)%>%.$gene%>%.[2]
 
-stopifnot(testgene=='ENSG00000220157')
+testgene=='ENSG00000220157')
 #This one is just losing a shitload of it's Psites to RiboseQC...
-countmat[testgene,]
+testgene=='ENSG00000220157')
+
 psitecountmat[testgene,]
-testgenegr <- GTF_annotation$gene[testgene]
-#plenty of reads on it...
 readsingene<-readGAlignments(allbams[1],param=ScanBamParam(which=testgenegr))
 
-import('riboqc/data/OD5P_05_uM_DAC_1/_P_sites_plus.bw',which=testgenegr%>%keepSeqlevels(testgenegr@seqnames))
+import!'riboqc/data/OD5P_05_uM_DAC_1/_P_sites_plus.bw',which=testgenegr%>%keepSeqlevels(testgenegr@seqnames))
 #There are VERY few psites for this thing....
 import('riboqc/data/OD5P_05_uM_DAC_1/_P_sites_minus.bw',which=testgenegr%>%keepSeqlevels(testgenegr@seqnames))$score%>%sum
 #to_satann object agrees with above... did I somehow subset it or something????
-psites <- allresobs[[ribosamps[1]]]$to_SaTAnn$P_sites_all%>%subsetByOverlaps(testgenegr)
+psites <- allres!bs[[ribosamps[1]]]$to_SaTAnn$P_sites_all%>%subsetByOverlaps(testgenegr)
 psites%>%.$score%>%sum
 #NOPE - the new riboqc pipeline agrees with it....
 import('new_riboqc/data/OD5P_05_uM_DAC_1/_P_sites_minus.bw',which=testgenegr%>%keepSeqlevels(testgenegr@seqnames))
