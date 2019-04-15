@@ -1,6 +1,7 @@
 #Get rpkms for our genes
 message('loading libraries')
 library(magrittr)
+library(assertthat)
 library(data.table)
 library(ggExtra)
 suppressMessages(library(stringr))
@@ -10,24 +11,29 @@ suppressMessages(library(GenomicFeatures))
 suppressMessages(library(GenomicAlignments))
 suppressMessages(library(edgeR))
 suppressMessages(library(tidyverse))
+
 source('/fast/groups/ag_ohler/work/dharnet_m/Ribo_Lausanne/src/functions.R')
+
+annofile <- 'riboqc/my_gencode.v24lift37.annotation.annoout'
+lncRNA_peptide_file <- '../ext_data/20190415_lncRNA_RNAseqmax_FINAL.txt'
 
 message('...done')
 
-GTF_annotation<-load_obj('riboqc/my_gencode.v24lift37.annotation.annoout')
+GTF_annotation<-load_obj(annofile)
 
 #get the orfs in the fasta file I sent
 fasta = '../export/ORFs/Fastas/OD5P/OD5P.fasta'
 sentorfs <- system(str_interp('grep -Poe "ENST[0-9_]+" ${fasta}'),intern=T)
 sent_gids <- system(str_interp('grep -Poe "ENSG[0-9_]+" ${fasta}'),intern=T)
 sentgtf <- '../export/ORFs/Fastas/OD5P/OD5P.gtf'%>%import
+sentseqs <- import(fasta)
 all(sent_gids %in% sentgtf$gene_id)
 all(sentorfs %in% sentgtf$ORF_id_tr)
 
 #The real question here is, are there ORFs with substantial numbers of riboseq reads that we miss in the analysis?
 
 #read in the data on the lincRNA peptides
-lncRNA_table <- readxl::read_excel('../ext_data/20180719_OD5P_lncRNA_RE_peptides_combiner.xlsx',sheet=2)%>%
+lncRNA_table <- fread(lncRNA_peptide_file)
 	set_colnames(c("MS-identified peptide", "gene_id", "Gene Name", 
 "Gene Type", "FPKM RNAseq OD5PCTRL", "FPKM RNAseq DAC"))
 clipid <- . %>% str_replace('\\.\\d+$','')
@@ -72,46 +78,145 @@ psitecountmat <- lapply(allresobs%>%map('to_SaTAnn')%>%map('P_sites_all')%>%.[ri
 psitecountmat%<>%simplify2array
 psitecountmat%<>%set_rownames(names(lincgenetranscripts))
 
+
+
+gids2plot <- lncRNA_table$gene_id
+gids2plot==names(lincgenetranscripts)
+gids2plot==rownames(psitecountmat)
+gids2plot==rownames(countmat)
+
 ##Now we need to test how many genes have nested stuff in them....
 complex_locus <- lincgenetranscripts%>%countOverlaps(GTF_annotation$genes)%>%`>`(1)
 
 
 
-psiterawreadscatterfile<-'../plots/psite_rawread_hitscatter.pdf'
-#dirname(psiterawreadscatterfile)%>%dir.create
-`Gene has ORF` = rownames(countmat) %in% sent_gids
 
-peptideinfofile<-'../tables/peptide_info_df.tsv'
-peptide_info_df<-read_tsv(peptideinfofile)
-lncRNA_table$peptide = lncRNA_table[[1]]
-`Peptide in ORF` <- lncRNA_table%>%mutate(found = peptide %in% peptide_info_df$peptide)%>%{setNames(.$found,.$gene_id)}
+###Now also read in the scRNAseq data
+scdetectfile<-'../data/fracdetected.rds'
+if(!file.exists(scdetectfile)) source('/fast/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/parse_ssc_data.R')
+#load the data
+fracdetected<-readRDS(scdetectfile)
+table(lncRNA_table$gene_id %in% fracdetected$ensemblID)
+stopifnot(sum(unique(lncRNA_table$gene_id) %in% fracdetected$ensemblID)==35)
+#create named vector with cell fractions
+scRNAseq_fraction <- lincgenetranscripts%>%
+	names%>%
+	match(fracdetected$ensemblID)%>%
+	fracdetected$detected[.]%>%
+	replace_na(0)
 
-`Peptide in ORF`%>%table
 
+
+`Gene has ORF` = gids2plot %in% sent_gid5
+
+sentseqs <- readAAStringSet(fasta)
+lncRNA_table$peptide %in% sentseqs
+peptide_hits <- lncRNA_table$peptide%>%lapply(vmatchPattern,subject=sentseqs)%>%map_dbl(.%>%unlist%>%length)
+table(peptide_hits==0)
+
+mycanonseq <- readAAStringSet('my_gencode.v24lift37.annotation.protein.fa')
+peptide_hits_canon <- lncRNA_table$peptide%>%lapply(vmatchPattern,subject=mycanonseq)%>%map_dbl(.%>%unlist%>%length)
+table(peptide_hits==0)
+
+table(peptide_hits_canon)
+
+
+#checking with fuzzy match
+peptide_hits_fuzzy <- lncRNA_table$peptide[`Gene has%>%lapply(vmatchPattern,max.mismatch=1,subject=sentseqs)%>%map_dbl(.%>%unlist%>%length)
+table(peptide_hits_fuzzy==0)
+
+
+
+# peptideinfofile<-'../tables/peptide_info_df.tsv'
+# peptide_info_df<-read_tsv(peptideinfofile)
+# lncRNA_table$peptide = lncRNA_table[[1]]
+#  <- lncRNA_table%>%mutate(found = peptide %in% peptide_info_df$peptide)%>%{setNames(.$found,.$gene_id)}
+sentseqs<- readAAStringSet(fasta)
+`Peptide in ORF` <- lncRNA_table$peptide%>%mclapply(vmatchPattern,subject=sentseqs)%>%map_lgl(.%>%unlist%>%length%>%`>`(0))
+
+stopifnot(`Peptide in ORF`%>%table == (c(46,14)))
+stopifnot(is.na(scRNAseq_fraction)%>%not%>%table == (c(29,31)))
+
+#label outliers
+labels2plot <- gids2plot%>%setNames(.,.)
+labels2plot[`Gene has ORF`]<- ''
+labels2plotscRNAseq <- labels2plot
+labels2plotscRNAseq[scRNAseq_fraction < 0.1 ]<-''
+labels2plotspsites <- labels2plot
+labels2plotspsites[psitecountmat[gids2plot,ribosamps]%>%rowSums%>%`<`(130) ]<-''
+
+
+intersect(labels2plotspsites,labels2plotscRNAseq)
+
+library(ggrepel)
+###Make scatterplot of psites vs raw reads to see if we're losing a lot in processing
+
+
+psiterawreadscatterfile<-'/fast/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/psite_rawread_hitscatter.pdf'
 pdf(psiterawreadscatterfile)
 plot<-qplot(
-	x=countmat[,ribosamps]%>%rowSums%>%add(1),
+	x=countmat[gids2plot,ribosamps]%>%rowSums%>%add(1),
 	xlab='Raw read Counts OD5P all Ribo Samples',
-	y=psitecountmat[,ribosamps]%>%rowSums%>%add(1),ylab='Raw Psite Counts OD5P all Ribo samples',
+	y=psitecountmat[gids2plot,ribosamps]%>%rowSums%>%add(1),ylab='Raw Psite Counts OD5P all Ribo samples',
 	log='xy',
 	shape=`Peptide in ORF`,
 	color = `Gene has ORF`,
-	fill = `Gene has ORF`)+
+	label=labels2plotspsites,
+	fill = `Gene has ORF`,guide=FALSE)+
 	theme_bw()+
+	geom_text_repel(alpha=I(0.5),show.legend=FALSE)+
 	geom_abline(slope=1,linetype=2)+
 	ggtitle('Psites vs. Reads for all\nlincRNA hit peptide attributed Genes')
 ggMarginal(plot,groupColour=TRUE,groupFill=TRUE)
 dev.off();message(normalizePath(psiterawreadscatterfile))
 
+psite_scrnaseq<-'/fast/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/psite_scrnaseq_hitscatter.pdf'
+pdf(psite_scrnaseq)
+plot<-qplot(
+	x=scRNAseq_fraction,
+	xlab='Log Normalized scRNAseq OD5P',
+	y=psitecountmat[gids2plot,ribosamps]%>%rowSums%>%add(1),ylab='Raw Psite Counts OD5P all Ribo samples',
+	log='y',
+	shape=`Peptide in ORF`,
+	color = `Gene has ORF`,
+	label=labels2plotscRNAseq,
+	fill = `Gene has ORF`)+
+	geom_text_repel(alpha=I(0.5),show.legend=FALSE)+
+	theme_bw()+
+	ggtitle('Psites vs. scRNAseq for all\nlincRNA hit peptide attributed Genes')
+# ggMarginal(plot)
+print(plot)
+dev.off();message(normalizePath(psite_scrnaseq))
+
+
+psite_scrnaseq<-'/fast/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/psite_scrnaseq_hitscatter.pdf'
+pdf(psite_scrnaseq)
+plot<-qplot(
+	x=scRNAseq_fraction,
+	xlab='Log Normalized scRNAseq OD5P',
+	y=psitecountmat[gids2plot,ribosamps]%>%rowSums%>%add(1),ylab='Raw Psite Counts OD5P all Ribo samples',
+	log='y',
+	shape=`Peptide in ORF`,
+	color = `Gene has ORF`,
+	label=labels2plotscRNAseq,
+	fill = `Gene has ORF`)+
+	geom_text_repel(alpha=I(0.5),show.legend=FALSE)+
+	theme_bw()+
+	ggtitle('Psites vs. scRNAseq for all\nlincRNA hit peptide attributed Genes')
+# ggMarginal(plot)
+print(plot)
+dev.off();message(normalizePath(psite_scrnaseq))
+
+
+stop('done making scatterplots')
 
 
 #why isn't this guy getting detected??
 testgene<-psitecountmat[,ribosamps]%>%rowSums%>%`>`(1000)%>%which%>%names
 stopifnot(testgene=='ENSG00000261645')
 testgene<-'ENSG00000261645'
-
-
-
+lncRNA_table$peptide %5n% sents
+sentseqs <- import(fasta)
 #scatterplot showing the P-site counts, and 
 
 
@@ -143,8 +248,9 @@ debug(counts_to_tpm)
 
 
 fraglengths<-colnames(allcountdf[,-1])%>%{ifelse(str_detect(.,'_L[57]'),101,29)}
-
-TPMdf <- counts_to_tpm(as.matrix(allcountdf[,-1]),genelengths,fraglengths,allcountdf[[1]])
+lncRNA_table$peptide %5n% sents
+sentseqs <- import(fasta)
+ counts_to_tpm(as.matrix(allcountdf[,-1]),genelengths,fraglengths,allcountdf[[1]])
 
 
 
@@ -176,7 +282,6 @@ RPKM%>%as.data.frame%>%
 	write_tsv(outfile)
 
 
-'LHRP3'
 
 
 #' so for the highly transcribed-but-not-detected gene, it looks like it's not detected because the P-sites are attributed to a different gene....
@@ -277,4 +382,11 @@ testgenegr <- GTF_annotation$gene[testgene]
 'ENSG00000215548'
 
 
+###New run?
+
+newpoolfasta = lapply(Sys.glob('SaTAnn.bak/*OD5P*/SaTAnn_Protein_sequences.fasta'),readAAStringSet)%>%Reduce(f=c)
+sentidsnew <- newpoolfasta%>%names%>%str_extract('[^_]+')%>%unique
+idtbl<-GTF_annotation$txs_gene%>%unlist%>%{data_frame(gene_id=names(.),transcript_id=.$tx_name)}
+sentgenesnew<-data_frame(transcript_id=sentids)%>%left_join(idtbl)
+table(lncRNA_table$gene_id %in% sentgenesnew$gene_id)
 

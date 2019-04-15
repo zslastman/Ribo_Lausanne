@@ -179,7 +179,7 @@ for(cell_line_i in c('OD5P','ONVC','OMM')){
 
 	allsi<-all_orfs%>%map(~.[,NULL])%>%GRangesList%>%unlist%>%seqinfo
 
-	outfasta <- 
+	# outfasta <- 
 
 	protseqs <- mergedorfdt%>%{AAStringSet(setNames(.$Protein,.$ORF_id_tr))}
 	names(protseqs)<-paste(mergedorfdt$ORF_id_tr,mergedorfdt$gene_biotype,mergedorfdt$gene_id,mergedorfdt$ORF_category_Gen,mergedorfdt$ORF_category_Tx_compatible,sep="|")
