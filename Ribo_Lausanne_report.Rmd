@@ -51,7 +51,14 @@ Rnaseq is available on them, as well as exome-seq data.
 
 ### Todos
 
-- Look at the loci identified, see how many of them have ORFs.
+Scatter plot for Uwe
+
+Parse the single data
+Parse the stuff I got from Chloe
+
+Finish methods.
+
+
 
 #### Data Quality
 
@@ -83,18 +90,34 @@ plot(1)
 ```
 
 
+##Notes for discussion
+
+A distinction needs to be made between prediction by Riboseq per se (all 60 nc peptides detected in phase 1 had at least 5 reads in the pooled Riboseq) and detection by Periodicity analysis in our samples. When considering the scatterplots below, The picture which emerges is that peptides not detected by Riboseq typically have low expression, or are expressed in a low fraction of cells. A few exceptions, e.g. ENSG00000269821, likely exist because of instances in which e.g. low mappability at the relatively short size of a Ribosomal footprint prevented accurate psite determination. 
+
+In particular, I would change
+
+"This relatively small overlap of ncHLAIp could be rationalized by the bias of RiboSeq to detect the higher expressed source genes (Supplementary Figure 6a). Specifically, when examining the expression of pc source genes identified in both approaches, the common genes were found to have significantly higher source RNA expression (Supplementary Figure 6b)."
+
+to
+
+"This likely reflects necessary limits to the detection of periodic RiboSeq reads in transcripts with low expression, or low mappability (Supplementary Figure 6a,b)"
+
+
+Where Figures S6a and b have been changed to:
+
+
+
 
 ## Methods
 
-### Alignment ORF detection.
-- i figured out which genome things were in by going through gencode gtf files. turns out our link RNAs, and presumably our peptides, are in gencode22, and hence GRCh38, while the vcfs are in 'GRCh37' (per the vcf file)
-- Lorenzo's work was in hg38, based on the overlap with Rpls
-- I then tried to figure out what these peptides actually were
-- I aligned to human genome GR38 since this is the genome used in the external files
-- i lifted variants over from 37 to 38.
-- using gencode annotation 22
-- I then ran the standard cubi RNAseq pipeline - star. seqqc etc etc.
-- I used the bams from this as input for the SaTaNN pipeline.
+Riboseq reads were stripped of adaptor sequences using cutdapt, and contaminants such as tRNAs and rRNA were removed by alignment to a contaminants index via Bowtie (PMID 19261174). Unaligned reads from this analysis were then aligned to human genome version hg19 with the STAR (PMID 23104886) splice-aware alignment tool allowing for up to 1 mismatch.The star genome index was built using gencode version 24 (lift 37). Reads with up to 20 multi-mapping positions were included, with multi mapping reads beings separately treated in subsequent peridicity analysis. The RIboseQC pipeline (RiboseQC paper) was used to deduce P-site positions from Riboseq reads, and this P-site data was then used as input to the SaTAnn pipeline (), for ORF-calling via isoform-aware spectral analysis. ORFs were called in both individual libraries and in the pooled set of all libraries for OD5P, and ORFs which were fully contained within ORFs detected in another library were merged. ORFs were tested for periodicity, by a multitaper test (PMID 26657557) and those with a p-value of 0.05  were kept for analyses. Protein Fastas were generated from the coordinates of these ORFs, and used both for validation of peptides found using the canonical database, and as a de novo assembled database for the subsequent round of  peptide detection. Peptides were considered validated by Riboseq if they matched anywhere within the translated ORF sequences.
+
+Riboseq loci plots were plotted with psite numbers per-base on a log2(n+1) scale.
+
+
+
+
+
 
 
 ### Loci plots

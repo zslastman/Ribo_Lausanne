@@ -16,7 +16,11 @@ envs
 export
 input
 pipeline_fasta
+pipeline
 plots
 presentations_posters
 tables
 
+.idea
+tmp
+misc_fastqs
