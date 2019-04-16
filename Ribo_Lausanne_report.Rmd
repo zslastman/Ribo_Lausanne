@@ -51,12 +51,13 @@ Rnaseq is available on them, as well as exome-seq data.
 
 ### Todos
 
-Scatter plot for Uwe
+1. Scatterplot with the sscRNAseq for ours.
 
-Parse the single data
-Parse the stuff I got from Chloe
+2. Update methods with annotation versions.
 
-Finish methods.
+3. Combine methods with Ilija's
+
+4. get it out.
 
 
 
@@ -68,7 +69,6 @@ Some text below
 dir.create('plots',showWarnings = FALSE)
 #create placeholder
 svg('plots/tmp.svg');plot(1,type='n');text(1,1,"This is a placeholder plot",cex=2);dev.off()
-include_graphics("plots/tmp.svg")
 include_graphics("plots/tmp.svg")
 
 ```
@@ -114,6 +114,8 @@ Riboseq reads were stripped of adaptor sequences using cutdapt, and contaminants
 
 Riboseq loci plots were plotted with psite numbers per-base on a log2(n+1) scale.
 
+
+Figure S_ Limits of Detection by Riboseq Analysis A) Scatterplot showing Processed P-sites vs Raw Riboseq reads for the ncHLAp detected using the canonical transcriptome. Triangles indicate peptides which were contained within an ORF with periodic Riboseq signal. Blue symbol peptides originate from genes which contain at least one periodic Riboseq signal. Difficulty in determining correct p-site offsets for some read lengths, mapping quality, and other factors reduce the number of P-sites available for the detection of periodicity, with detection becoming difficult for genes with low expression, although all ncHLAp show at least some raw Riboseq signal. B) P-sites vs scRNAseq for ncHLAp detected using canonical transcriptome. With some exceptions due to imperfect mappability etc, genes with few psites tend to show little scRNAseq signal and are detected in few cells. Note that only one gene (ENSG00000247271 - labelled) shows greater than 100 p-sites across all samples and is detected in more than 10% of cells  C) scRNAseq signal for HLAp detected using a Riboseq-derived translatome. ncHLAp (blue) detected using the Riboseq-translatome show a greater rate of detection in scRNAseq experiments, again indicating that Ribotaper identifies ORFs which show reproducible evidence of translation.
 
 
 

@@ -27,6 +27,8 @@ if(!exists("GTF_annotation")) GTF_annotation<-load_obj(annofile)
 #get the orfs in the fasta file I sent
 sentorfs <- system(str_interp('grep -Poe "ENST[0-9_]+" ${fasta}'),intern=T)
 sent_gids <- system(str_interp('grep -Poe "ENSG[0-9_]+" ${fasta}'),intern=T)
+sent_pcoding <- sent_gids %in% system(str_interp('grep -e "protein_coding" ${fasta} | grep -Poe "ENSG[0-9_]+" '),intern=T)
+
 sentgtf <- '../export/ORFs/Fastas/OD5P/OD5P.gtf'%>%import
 sentseqs <- import(fasta)
 all(sent_gids %in% sentgtf$gene_id)
@@ -156,7 +158,9 @@ labels2plot <- gids2plot%>%setNames(.,.)
 labels2plot[`Gene has ORF`]<- ''
 labels2plotscRNAseq <-labels2plot
 labels2plotscRNAseq[scRNAseq_fraction < 0.1 ]<-''
+labels2plotscRNAseq[psitecountmat[gids2plot,ribosamps]%>%rowSums%>%`<`(130)]<-''
 labels2plotspsites <- labels2plot
+labels2plotspsites[scRNAseq_fraction < 0.1  ]<-''
 labels2plotspsites[psitecountmat[gids2plot,ribosamps]%>%rowSums%>%`<`(130) ]<-''
 
 
@@ -185,7 +189,7 @@ psite_scrnaseq<-here('./plots/psite_scrnaseq_hitscatter.pdf')
 pdf(psite_scrnaseq)
 plot2<-qplot(
 	x=scRNAseq_fraction[gids2plot],
-	xlab='Log Normalized scRNAseq OD5P',
+	xlab='Fraction of Cells with scRNAseq Reads',
 	y=psitecountmat[gids2plot,ribosamps]%>%rowSums%>%add(1),ylab='Raw Psite Counts OD5P all Ribo samples',
 	log='y',
 	shape=`Peptide in ORF`,
@@ -206,18 +210,42 @@ gg_color_hue <- function(n) {
 ggcolor2 <- gg_color_hue(2)[2]
 
 
+
+novel_nchlapdf<-ribonovelhits%>%filter(gene_id %in% sent_gids[!sent_pcoding])
+
+##Now also do this for the /ibo-only genes
+psite_riboscrnaseq<-here('plots/nc_riboonly_psite_scrnaseq_hitscatter.pdf')
+pdf(psite_riboscrnaseq)
+plot3<-qplot(
+	x=scRNAseq_fractionall[novel_nchlapdf$gene_id],
+	xlab='Fraction of Cells with scRNAseq Reads',
+	y=psitecountmat[novel_nchlapdf$gene_id,ribosamps]%>%rowSums%>%add(1),ylab='Raw Psite Counts OD5P all Ribo samples',
+	log='y',
+	# label=labels2plotscRNAseq,
+	shape=I('triangle'),
+	color=I(ggcolor2)
+	)+
+	# geom_text_repel(alpha=I(0.5),show.legend=FALSE)+
+	theme_bw()+
+	ggtitle('Psites vs. scRNAseq for all Peptides found using Riboseq-translatome\n')
+# ggMarginal(plot)
+print(plot3)
+# print(plot(1))
+dev.off()
+
 ##Now also do this for the /ibo-only genes
 psite_riboscrnaseq<-here('plots/riboonly_psite_scrnaseq_hitscatter.pdf')
 pdf(psite_riboscrnaseq)
 plot3<-qplot(
 	x=scRNAseq_fractionall[ribonovelhits$gene_id],
-	xlab='Log Normalized scRNAseq OD5P',
+	xlab='Fraction of Cells with scRNAseq Reads',
 	y=psitecountmat[ribonovelhits$gene_id,ribosamps]%>%rowSums%>%add(1),ylab='Raw Psite Counts OD5P all Ribo samples',
 	log='y',
 	# label=labels2plotscRNAseq,
 	shape=I('triangle'),
 	color=I(ggcolor2)
 	)+
+	scale_color_manuals(values=c('purple',ggcolor2))+
 	# geom_text_repel(alpha=I(0.5),show.legend=FALSE)+
 	theme_bw()+
 	ggtitle('Psites vs. scRNAseq for all Peptides found using Riboseq-translatome\n')
