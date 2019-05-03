@@ -1,6 +1,8 @@
 *Rproj*
 *sublime-*
 .Rproj.user
+.idea
+data
  exploration/intermediate_results/
 .Rhistory
 .RData

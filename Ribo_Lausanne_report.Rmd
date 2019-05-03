@@ -109,6 +109,8 @@ Where Figures S6a and b have been changed to:
 
 
 ## Methods
+Riboseq was performed in an identical manner to Calviello et al 2016, with libraries generated using the NEXTflex smallRNA-seq kit v3 from Bioscientific (#NOVA-5132-05)
+
 
 Riboseq reads were stripped of adaptor sequences using cutdapt, and contaminants such as tRNAs and rRNA were removed by alignment to a contaminants index via Bowtie (PMID 19261174). Unaligned reads from this analysis were then aligned to human genome version hg19 with the STAR (PMID 23104886) splice-aware alignment tool allowing for up to 1 mismatch.The star genome index was built using gencode version 24 (lift 37). Reads with up to 20 multi-mapping positions were included, with multi mapping reads beings separately treated in subsequent peridicity analysis. The RIboseQC pipeline (RiboseQC paper) was used to deduce P-site positions from Riboseq reads, and this P-site data was then used as input to the SaTAnn pipeline (), for ORF-calling via isoform-aware spectral analysis. ORFs were called in both individual libraries and in the pooled set of all libraries for OD5P, and ORFs which were fully contained within ORFs detected in another library were merged. ORFs were tested for periodicity, by a multitaper test (PMID 26657557) and those with a p-value of 0.05  were kept for analyses. Protein Fastas were generated from the coordinates of these ORFs, and used both for validation of peptides found using the canonical database, and as a de novo assembled database for the subsequent round of  peptide detection. Peptides were considered validated by Riboseq if they matched anywhere within the translated ORF sequences.
 
