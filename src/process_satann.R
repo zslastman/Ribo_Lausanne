@@ -35,14 +35,18 @@ extract_id <- function(strings,ids){
 
 #initiaal form when testing
 #let's look at the scores for our
-cell_lines<-c('OD5P','OMM','ONVC') 
-satannfiles <- Sys.glob('SaTAnn/*/*Final_ORFs*')%T>%{stopifnot(length(.)>0)}
-satannorfs <- 
+sampledf<- here::here('pipeline/sample_parameter.csv')%>%fread%>%filter(assay=='ribo')
+cell_lines <- sampledf%>%.$cell_line%>%unique
+
+satannfiles <- Sys.glob('SaTAnn/*/*final_SaTAnn_res*')%T>%{stopifnot(length(.)>0)}
+if(!exists('satannorfs')) { satannorfs <- 
 	# Sys.glob('SaTAnn/*/*Final_ORFs*')%>%
 	satannfiles%>%
 	setNames(.,basename(dirname(.)))%>%
 	mclapply(load_objs)
 
+	satannorfs%<>%map('SaTAnn_results')
+}
 #first create gtf for all the 
 
 for(i in seq_along(satannorfs)){
@@ -126,7 +130,9 @@ satann_summary_table$sample
 
 mergesamples<-satann_summary_table$sample%>%grep(v=T,inv=T,patt='_')
 
-pdf(h=4,w=6,'/fast_new/work/groups/ag_ohler/dharnet_m/Ribo_Lausanne/plots/fp_bias_batches.svg')
+library(here)
+
+pdf(h=4,w=6,here('plots/fp_bias_batches.pdf'))
 satann_summary_table%>%
 	filter(!sample %in% mergesamples)%>%
 	mutate(new = sample%>%str_detect('ctrl\\d+(B|L)'))%>%
@@ -164,13 +170,22 @@ allgorfs <- allgorfs[!duplicated(paste0(names(allgorfs),as.character(allgorfs)))
 allgorfs$ORF_id_tr <- names(allgorfs)
 groupsamples <- names(all_orfs)%>%str_subset('OD5P')
 
-cell_line_i<-'OD5P'
-for(cell_line_i in c('OD5P','ONVC','OMM')){
 
-	groupsamples <- c(groupsamples%>%str_subset('^[^_]+$'),groupsamples)%>%unique
+cell_line_i<-'OD5P'
+
+
+cell_lines<-all_orfs%>%names%>%str_subset(neg=TRUE,'_')
+
+for(cell_line_i in cell_lines ){
+
+	#use the cell line, plus any of  the individual libraries with ORFs
+	groupsamples <- c(cell_line_i,sampledf%>%filter(str_detect(sample_id,cell_line_i))%>%.$sample_id%>%intersect(all_orfs%>%names))
+
+	map(groupsamples,message)
+	message("\n\n\n")
 
 	grouporfs <- all_orfs[groupsamples]%>% map(~.[,NULL])%>% GRangesList %>% unlist %>% unique
-		
+		all_orfs[groupsamples]%>% map(~.[,NULL])%>%map(length)
 	ovs <- grouporfs %>% GenomicRanges::findOverlaps(type='within') %>% as.data.frame %>% filter(!queryHits==subjectHits)
 
 	grouporfs <- grouporfs[! 1:length(grouporfs) %in% ovs$queryHits]
@@ -200,7 +215,6 @@ for(cell_line_i in c('OD5P','ONVC','OMM')){
 # satannorfs[[mergedorfdt%>%subset(ORF_id_tr==diffgorfs)%>%.$sample]]$ORFs_gen[diffgorfs]
 
 
-diffgorfs%in%allgorfs$ORF_id_tr
 
 
 

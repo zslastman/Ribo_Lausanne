@@ -243,9 +243,9 @@ plot3<-qplot(
 	log='y',
 	# label=labels2plotscRNAseq,
 	shape=I('triangle'),
-	color=I(ggcolor2)
+	color=ribonovelhits$gene_id %in% sent_gids[!sent_pcoding]
 	)+
-	scale_color_manuals(values=c('purple',ggcolor2))+
+	scale_color_manual(name='Non-coding',values=c('black',ggcolor2))+
 	# geom_text_repel(alpha=I(0.5),show.legend=FALSE)+
 	theme_bw()+
 	ggtitle('Psites vs. scRNAseq for all Peptides found using Riboseq-translatome\n')

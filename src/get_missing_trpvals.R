@@ -10,6 +10,7 @@ suppressMessages(library("GenomicFeatures"))
 suppressMessages(library("GenomicAlignments"))
 suppressMessages(library("foreach"))
 suppressMessages(library("doMC"))
+
 source('../src/functions.R')
 
 
@@ -17,7 +18,7 @@ source('../src/functions.R')
 
 library(GenomicFeatures)
 
-GTF_annotation <- load_obj('riboqc/my_gencode.v24lift37.annotation.annoout')
+GTF_annotation <- load_objs('riboqc/my_gencode.v24lift37.annotation.annoout')[[1]]
 
 ###Objective here is to seperate some of the mess above - not sure best way to get that psite vector... probably using 
 fasta = '../export/ORFs/Fastas/OD5P/OD5P.fasta'

@@ -22,7 +22,9 @@ pipeline
 plots
 presentations_posters
 tables
+expor
 
 .idea
 tmp
 misc_fastqs
+R_cache

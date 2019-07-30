@@ -198,6 +198,8 @@ for (rangename in names(ranges_with_goodorf)){
 	ribotracks <- bigwigpairlist[whichwigs]%>%
 		map(~get_riboproftrack(plotgenomewindow,.,rangename))
 
+
+	
 	
 	# add_legendtrack <- function(ribotracks){
 	# 	l<-length(ribotracks)
